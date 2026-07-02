@@ -1,0 +1,1397 @@
+"""
+DU fully-solid (dense) chunk generator — Phase B (large solid cubes).
+
+Reverse-engineered from export 2494 (solid cube spanning 4x4x4 chunks, with 8
+fully-interior chunks {1,2}^3). The dense fully-solid chunk encodes the 32^3
+solid as a W x H grid (W cols ~ lx, H rows ~ ly) of:
+  - 5-byte MARKERS  [val,01,02,32,00]   (one per column, val=1 bulk / 71 last col)
+  - 8-byte GROUPS   [val,01,mat,7e,7e,7e,N,00]  (one per column; bulk val=33 = SOLID)
+separated by [255,0]*9 + [sep,0], framed by a 4-byte preamble + [255,0]*9 trailing.
+
+STATUS: byte-EXACT for the canonical interior chunk (2,2,2) of 2494 (33x33 grid).
+The other 7 interior chunks are POSITION-DEPENDENT (preamble, separator byte,
+corner/edge group values, grid W/H, and the mat/N depth flag all shift with cx,cy,cz)
+— same complexity class as the crossing generators. Observed so far:
+  - cz=2 -> special mat/N = 32 ; cz=1 -> 33   (z-depth flag)
+  - low-coord side (cx==1 or cy==1) adds an extra row/col (W or H = 34)
+  - first-group/corner values (236,201,35,34,31...) are origin-relative
+    (236 == corner-generator base) -> near-origin chunks encode vs construct origin.
+TODO: derive the (cx,cy,cz)->(preamble, sep, grid, edge-values) rule to cover all
+positions, then face/edge/corner solid chunks, then envelope + generate_solid_cube().
+"""
+
+# ── DEEP-INTERIOR PRIMITIVE ────────────────────────────────────────────────
+# The fully-solid chunk with NO exposed surface (all 6 neighbors solid).
+# UNIFORM + translation-invariant: verified byte-identical across all 64 deep
+# chunks of 2495 (192-voxel solid cube on a Static-M / Size-128 core).
+# Compact run-encoding: [01 02 ff]*167 + [01 02 7a] + [00 ff]*167 (839 bytes).
+# This is THE reusable interior building block for any large solid cube.
+_DEEP_INTERIOR_SCAN = bytes.fromhex(
+    "0102ff" * 167 + "01027a" + "00ff" * 167 + "00"
+)
+
+
+def gen_deep_interior_scan():
+    """Return the fully-solid no-surface interior chunk scan (839 bytes, constant)."""
+    return _DEEP_INTERIOR_SCAN
+
+
+# ── SINGLE-COLUMN SURFACE ENCODER ──────────────────────────────────────────
+# An isolated 1x1xh column (bottom-aligned) at chunk-local (lx,ly,lz). This is
+# the atomic SURFACE primitive (the path to complex shapes + smooth surfaces).
+# Byte-exact vs 2497/2499/2509/2511/2513/2517/2519/2521 (Static-M, hcCarbon).
+#   CV   = (217 - 55*lx + 35*ly + lz) % 256          (corner value; 7 pts)
+#   decl = [0,CV,01,02,h-1,00] at pair floor((153*lx+358)/32)
+#   pre-FG byte = (120 - CV - (h-1)) % 256            (also the mat-tail ftr)
+#   FG (4 groups) [val,01,h,7e,7e,7e,h,00]: vals = CV+19, 33-h, 164-h, 33-h
+#   run-length byte = h (height); 7e7e7e = displacement slots (0 = flat).
+# NOTE: length / FG-offset use an empirical floor-step (validated lx<=22, ly<=13);
+# the exact floor form + ly/lz position terms + COMPOSITION (adjacent/gap/2D) are
+# the next sub-problems toward the general occupancy->scan encoder.
+def gen_single_column(lx, ly, lz, h):
+    CV = (217 - 55 * lx + 35 * ly + lz) % 256
+    declpair = (153 * lx + 358) // 32
+    step = not (lx <= 13 and ly <= 10)        # empirical floor-step (tested range)
+    L = 702 if step else 706
+    prepair = 169 if step else 170
+    fg0 = declpair + (165 if step else 166)
+    s = bytearray(bytes([255, 0]) * (L // 2))             # ff00 background
+    for p in range(declpair):                             # 00ff before declaration
+        s[2 * p] = 0; s[2 * p + 1] = 255
+    s[2 * declpair:2 * declpair + 6] = bytes([0, CV, 1, 2, h - 1, 0])
+    s[2 * prepair] = (120 - CV - (h - 1)) % 256
+    def grp(pp, val):
+        s[2 * pp:2 * pp + 8] = bytes([val % 256, 1, h, 0x7e, 0x7e, 0x7e, h, 0])
+    grp(fg0, CV + 19); grp(fg0 + 4, 33 - h); grp(fg0 + 12, 164 - h); grp(fg0 + 16, 33 - h)
+    return bytes(s)
+
+
+def interior_params(cx, cy, cz):
+    """Position-dependent scalar params for a fully-solid chunk near the construct
+    origin. Derived from 2494's 8 interior chunks {1,2}^3 (cx,cy,cz in {1,2}).
+
+    These are crossing-class formulas: the LOW-x side (cx==1) collapses to a pure
+    background form; the high-x side (cx==2) carries the marker structure.
+      depth = 32 if cz==2 else 33                      (z-depth flag; CONFIRMED)
+      sep   = 217 - 2*(cz==1) - 70*(cy==1)  for cx==2  (217/215/147/145; CONFIRMED)
+      cx==1 -> preamble [0,255,0,255], sep region all background (sep byte 255)
+    NOTE: only validated for cx,cy,cz in {1,2} (near origin). The reusable DEEP-
+    interior primitive (all sides uniform) is NOT present in 2494 (too small / not
+    chunk-aligned) and needs a bigger cube to capture. The cz=1 / cy=1 chunks also
+    carry internal grid structure beyond the edges (origin/boundary coupling).
+    """
+    depth = 32 if cz == 2 else 33
+    if cx == 2:
+        sep = (217 - 2 * (cz == 1) - 70 * (cy == 1)) & 0xFF
+    else:
+        sep = 255
+    return depth, sep
+
+
+def gen_interior_scan(W=33, H=33, sep=217, depth=32):
+    """Fully-solid interior chunk scan (canonical case, byte-exact vs 2494 (2,2,2)).
+
+    W = column count, H = row count (33 for the high-coord canonical chunk).
+    sep = separator byte before the group grid. depth = mat/N flag (32 for cz=2).
+    """
+    s = bytearray()
+    s += bytes([1, 2, 32, 0])                              # preamble
+    # markers: H rows x W cols, omitting the very last cell (r=H-1, c=W-1)
+    for r in range(H):
+        for c in range(W):
+            if r == H - 1 and c == W - 1:
+                continue
+            val = 71 if c == W - 1 else 1
+            s += bytes([val, 0x01, 0x02, 32, 0x00])
+    s += bytes([255, 0] * 9 + [sep, 0])                    # separator
+    # groups: H rows x W cols
+    for r in range(H):
+        for c in range(W):
+            if r == H - 1:
+                val, mat, N = (71, depth, depth) if c == 0 else (1, depth, depth)
+            elif c == W - 1:
+                val, mat, N = 1, depth, depth
+            elif c == 0:
+                val, mat, N = (31, 0, 0) if r == 0 else (103, 0, 0)
+            else:
+                val, mat, N = 33, 0, 0
+            s += bytes([val, 0x01, mat, 0x7e, 0x7e, 0x7e, N, 0x00])
+    s += bytes([255, 0] * 9)                               # trailing
+    return bytes(s)
+
+
+if __name__ == "__main__":
+    import sys, json, base64, lz4.block, struct
+    sys.path.insert(0, "/home/du")
+    from tests.test_h3_generator import find_export
+    bp = json.load(open(find_export(2494)))
+    byc = {(e['x']['$numberLong'], e['y']['$numberLong'], e['z']['$numberLong']): e
+           for e in bp['VoxelData'] if e['h'] == 3}
+    raw = base64.b64decode(byc[(2, 2, 2)]['records']['voxel']['data']['$binary'])
+    v = lz4.block.decompress(raw[12:], uncompressed_size=struct.unpack('<I', raw[4:8])[0])
+    idx = v.find(b'Debug1'); real = v[64:idx - 13]
+    print("interior (2,2,2) byte-exact:", gen_interior_scan(33, 33) == real)
+
+
+# ── 2D FLAT-PLATE COMPOSITION (surface) ────────────────────────────────────
+# A flat rectangular nx*ny footprint at constant height h, base column at
+# chunk-local (10,10,10) (CV=27). Byte-exact vs 2497(1x1)/2523(2x1)/2525(1x2)/
+# 2531(1x3)/2535(2x2). Composition nests: y-cluster inside x-row.
+# (High nx>~5 hits an unmodeled n1 floor-step; fine for small shapes.)
+def gen_plate_scan(nx, ny, h, CV=27):
+    def pad_to(s, t):
+        while len(s) < t: s += bytes([255, 0])
+        return s[:t]
+    s = bytearray(bytes([0, 255]) * 59)                         # 00ff prefix (118B)
+    for xi in range(nx):
+        if xi > 0: s += bytes([255, 0]) * 4                     # x-gap
+        if xi == 0: s += bytes([0, CV, 1, 2, h - 1, 0])         # first decl
+        else: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])  # x-marker
+        for _ in range(1, ny): s += bytes([33, 1, 2, h - 1, 0]) # y-markers
+    pre = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1)
+    s = pad_to(s, pre)
+    s += bytes([(120 - CV - (h - 1) - 35 * (ny - 1) + 55 * (nx - 1)) % 256, 0])
+    s = pad_to(s, pre + 110)                                    # fg0 = pre+110
+    clusters = 1 + nx
+    for ci in range(clusters):
+        opener = (CV + 19) if ci == 0 else (164 - h - 35 * (ny - 1))
+        s += bytes([opener % 256, 1, h, 0x7e, 0x7e, 0x7e, h, 0])
+        for _ in range(ny): s += bytes([(33 - h) % 256, 1, h, 0x7e, 0x7e, 0x7e, h, 0])
+        if ci < clusters - 1: s += bytes([255, 0]) * 4
+    L = (pre + 110) + clusters * (1 + ny) * 8 + (clusters - 1) * 8 + (216 - 10 * (nx - 1))
+    return bytes(pad_to(s, L))
+
+
+# ── 2D HEIGHTMAP COMPOSITION (arbitrary per-column heights) ─────────────────
+# H[xi][yi] = height of column (xi,yi); base column at chunk-local (10,10,10),
+# all columns bottom-aligned (z0=10). Byte-EXACT vs ALL references (flat,
+# monotonic ramps/staircases, AND non-monotonic peak): 2497/2523/2525/2531/
+# 2535/2505/2529/2539/2541/2545. Handles arbitrary heightmaps (pyramids/domes/
+# terrain). Composition nests: y-cluster (vertical running-max) inside x-row
+# (running-MAX PROFILE that propagates peaks forward; last cluster caps at the
+# actual end column). x-axis values key off each column's LAST y-row.
+# Positions are height-independent. (nx>~4 / ny>~3 may hit an n1 floor-step.)
+def gen_heightmap_scan(H, CV=27):
+    nx = len(H); ny = len(H[0])
+    rInc = lambda c, j: max(c[:j + 1])              # running max from row 0..j
+    rDec = lambda c, j: max(c[j:])                  # running max from row j..end
+    lastrow = [H[i][ny - 1] for i in range(nx)]
+    rmaxLR = [max(lastrow[:k + 1]) for k in range(nx)]   # running max of last-rows
+    prof = lambda upto: [max(H[i][j] for i in range(upto + 1)) for j in range(ny)]
+    h00 = H[0][0]
+    def pad_to(s, t):
+        while len(s) < t: s += bytes([255, 0])
+        return s[:t]
+    s = bytearray(bytes([0, 255]) * 59)                          # 00ff prefix
+    for xi in range(nx):
+        if xi > 0: s += bytes([255, 0]) * 4                      # x-gap
+        for yi in range(ny):
+            h = H[xi][yi]
+            if xi == 0 and yi == 0: s += bytes([0, CV, 1, 2, h - 1, 0])
+            elif yi == 0: s += bytes([(200 - H[xi - 1][ny - 1] - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
+            else: s += bytes([(34 - H[xi][yi - 1]) % 256, 1, 2, h - 1, 0])
+    step = 2 * ((nx - 1) // 4) - 2 * ((ny - 1) // 3)   # n1 floor-step (nx<=8, ny<=5 validated)
+    pre = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7) + 2 * (declpair0 - 59)
+    s = pad_to(s, pre)
+    s += bytes([(120 - CV - (h00 - 1) - 35 * (ny - 1) + 55 * (nx - 1) - (H[nx - 1][ny - 1] - h00)) % 256, 0])
+    s = pad_to(s, pre + 110)
+    def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+    s += grp(CV + 19, h00)                                       # top cluster (col0)
+    for j in range(ny): s += grp(33 - rInc(H[0], j), rDec(H[0], j))
+    s += bytes([255, 0]) * 4
+    for k in range(nx):                                          # bottom clusters
+        EC = H[nx - 1] if k == nx - 1 else prof(k + 1)           # end-cap vs running-max profile
+        s += grp(164 - rmaxLR[k] - 35 * (ny - 1), EC[0])
+        for j in range(ny): s += grp(33 - rInc(EC, j), rDec(EC, j))
+        if k < nx - 1: s += bytes([255, 0]) * 4
+    L = (pre + 110) + (1 + nx) * (1 + ny) * 8 + nx * 8 + (216 - 10 * (nx - 1)) + step
+    return bytes(pad_to(s, L))
+
+
+# ── EXTRUDED-PROFILE DESCENT GENERATOR (ny-uniform, arbitrary profile) ──────
+# A 1D height profile p[0..nx-1] extruded along ny (every y-row identical).
+# Handles ANY profile: rises, descents, peaks, plateaus, valleys. Byte-exact vs
+# 17 refs incl held-out: 2575/2577/2579/2581/2583/2585/2571/2573/2569/2501/2505/2535/2497
+# + HO 2587[4,3,2,1] / 2589[3,2,1,2,3].
+#   cluster run  R[k] = max(p[k],p[k+1]) (k<nx-1) else p[nx-1]
+#   opener       = 164 - max(p[k-1],p[k]) - 35*(ny-1)   (LEFT-boundary max)
+#   SPECIAL (interior peak / gradual / plateau / valley-ascent): 2*ny groups, inner pair:
+#     plateau -> [1,0]; consecutive descent-specials -> first [1,1]; else gradual -> [0,1].
+def gen_extruded_scan(p, ny, CV=27):
+    nx = len(p); base = min(p)
+    R = [max(p[k], p[k + 1]) if k < nx - 1 else p[nx - 1] for k in range(nx)]
+    RL = [p[0] if k == 0 else max(p[k - 1], p[k]) for k in range(nx)]
+    def descent_ahead(k): return any(p[j] < p[k] for j in range(k + 1, nx))
+    def interior_peak(i): return any(p[j] < p[i] for j in range(i + 1, nx))
+    def special(k):
+        if k >= nx - 1: return None
+        a, b = p[k], p[k + 1]
+        if a == b: return 'plat' if descent_ahead(k) else None
+        if a > b:  return 'grad' if b > base else None
+        rose_after_descent = any(p[j] > p[j + 1] for j in range(k))    # a descent occurred before k
+        return 'grad' if (a > base and (interior_peak(k + 1) or rose_after_descent)) else None
+    def desc_special(k): return k < nx - 1 and special(k) == 'grad' and p[k] > p[k + 1]
+    def pad_to(s, t):
+        while len(s) < t: s += bytes([255, 0])
+        return s[:t]
+    s = bytearray(bytes([0, 255]) * declpair0)
+    for xi in range(nx):
+        if xi > 0: s += bytes([255, 0]) * 4
+        for yi in range(ny):
+            h = p[xi]
+            if xi == 0 and yi == 0: s += bytes([0, CV, 1, 2, h - 1, 0])
+            elif yi == 0: s += bytes([(200 - p[xi - 1] - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
+            else: s += bytes([(34 - p[xi]) % 256, 1, 2, h - 1, 0])
+    step = 2 * ((nx - 1) // 4) - 2 * ((ny - 1) // 3)
+    pre = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7) + 2 * (declpair0 - 59)
+    h00 = p[0]
+    s = pad_to(s, pre)
+    s += bytes([(120 - CV - (h00 - 1) - 35 * (ny - 1) + 55 * (nx - 1) - (p[nx - 1] - h00)) % 256, 0])
+    s = pad_to(s, pre + 110)
+    def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+    s += grp(CV + 19, h00)
+    for _ in range(ny): s += grp(33 - h00, h00)
+    s += bytes([255, 0]) * 4
+    nspec = 0
+    for k in range(nx):
+        h = R[k]; sp = special(k)
+        s += grp(164 - RL[k] - 35 * (ny - 1), h)
+        if sp:
+            nspec += 1
+            if sp == 'plat':
+                inner = (1, 0)
+            else:  # gradual: 2nd byte = step magnitude; 1st = 1 for run of consecutive descent-specials
+                inner = (1 if (desc_special(k) and desc_special(k + 1)) else 0, abs(p[k + 1] - p[k]))
+            for _ in range(ny - 1):
+                s += grp(33 - h, 0); s += grp(inner[0], inner[1])
+            s += grp(33 - h, h)
+        else:
+            for _ in range(ny): s += grp(33 - h, h)
+        if k < nx - 1: s += bytes([255, 0]) * 4
+    L = (pre + 110) + (1 + nx) * (1 + ny) * 8 + nx * 8 + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8
+    return bytes(pad_to(s, L))
+
+
+# ── UNIFIED GENERAL HEIGHTMAP GENERATOR (ny-varying + descents) ─────────────
+# H[xi][yi] = height of column (xi,yi). Supersedes gen_heightmap_scan +
+# gen_extruded_scan: handles ARBITRARY 2D heightmaps incl per-row variation AND
+# gradual descents/valleys/peaks/plateaus. Byte-exact vs 27 refs (flat, monotonic,
+# dome, pyramid, all extruded descents incl 4 held-outs, CR/CB corner ramps).
+#   x-marker/decls: as before (x uses H[xi-1][ny-1], y uses H[xi][yi-1]).
+#   opener VALUE from LAST-row profile p=H[*][ny-1]; opener RUN from FIRST-row R.
+#   seconds: per-row boundary-max EC[j]=max(H[k][j],H[k+1][j]) -> (33-rInc(EC,j),rDec(EC,j)).
+#   SPECIAL clusters (descent on last-row profile): inner [0,1]/[1,1]/[1,0] (see gen_extruded_scan).
+# NOTE: ny-varying + special-trigger (gradual descent on a y-varying last-row) is the
+# one path with no reference yet -> validate via held-out before fully trusting.
+def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
+    nx = len(H); ny = len(H[0])
+    CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256        # first-column corner value
+    # decl-prefix constant: positive octant (cz>=8) uses C=322; the NEGATIVE-Z octant
+    # (cz<8) uses C=324 (verified byte-exact vs neg-Z plates 2904-2925; the +2 tips the
+    # floor when base%32>=30). Everything else (CV, structure, values) mirrors positive:
+    # negative-Z is gen_heightmap_unified(lx0, ly0, lz0=gz%32, cz_neg=True), cz=8+gz//32.
+    declpair0 = (153 * lx0 + 4 * ly0 + (324 if cz_neg else 322)) // 32
+    p = [H[xi][ny - 1] for xi in range(nx)]; base = min(p)
+    rInc = lambda c, j: max(c[:j + 1]); rDec = lambda c, j: max(c[j:])
+    def EC(k): return list(H[nx - 1]) if k == nx - 1 else [max(H[k][j], H[k + 1][j]) for j in range(ny)]
+    def descent_ahead(k): return any(p[j] < p[k] for j in range(k + 1, nx))
+    def interior_peak(i): return any(p[j] < p[i] for j in range(i + 1, nx))
+    def special(k):
+        if k >= nx - 1: return None
+        a, b = p[k], p[k + 1]
+        if a == b: return 'plat' if descent_ahead(k) else None
+        if a > b: return 'grad' if b > base else None
+        rose = any(p[j] > p[j + 1] for j in range(k))
+        return 'grad' if (a > base and (interior_peak(k + 1) or rose)) else None
+    def desc_special(k): return k < nx - 1 and special(k) == 'grad' and p[k] > p[k + 1]
+    def pad_to(s, t):
+        while len(s) < t: s += bytes([255, 0])
+        return s[:t]
+    # floor-step & gap-shrinks (validated nx<=12, ny<=10):
+    step = (2 * ((nx + 1) // 5) if ny == 1 else 2 * ((nx - 1) // 4)) - 2 * (ny >= 4) + 2 * (4 <= ny <= 6 and (nx >= 3 or (nx == 2 and ly0 >= 0))) + dstep  # nx floor-step; ny>=4 corr -2 base, +2 back for ny=4..6 & (nx>=3 or nx==2 w/ ly0>=0); nx==2 neg-ly0 (y-seam) keeps -2; dstep=+2 down-ghost
+    xgap = bytes([255, 0]) * (4 - (ny >= 7))             # decl x-gap: 8B(ny<=6)/6B(ny>=7)
+    clgap = bytes([255, 0]) * (4 - (ny >= 6))            # FG cluster gap: 8B(ny<=5)/6B(ny>=6)
+    s = bytearray(bytes([0, 255]) * declpair0)
+    for xi in range(nx):
+        if xi > 0: s += xgap
+        for yi in range(ny):
+            h = H[xi][yi]
+            if xi == 0 and yi == 0: s += bytes([0, CV, 1, 2, h - 1, 0])
+            elif yi == 0: s += bytes([(200 - H[xi - 1][ny - 1] - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
+            else: s += bytes([(34 - H[xi][yi - 1]) % 256, 1, 2, h - 1, 0])
+    h00 = H[0][0]
+    preval_signed = 120 - CV - (h00 - 1) - 35 * (ny - 1) + 55 * (nx - 1) - (H[nx - 1][ny - 1] - h00)
+    # base-position align jitter DECOUPLED into TWO independent CV bands (was one `bfs`):
+    #   bw (WIDE, CV>160): shifts preval position -2 and total length -2.
+    #   bn (NARROW, 160<CV<=BN_HI): shifts fg0 anchor -2 and total length -2.
+    #   L_shift = bw + bn.  Usually bw==bn, so the old bfs=CV>160 (pre/fg0 -2, L -4)
+    #   worked everywhere EXCEPT the top of the band, where bn drops to 0 while bw
+    #   stays 1 (pre -2, fg0 +0, L -2). Verified byte-exact across the full lx0 cycle
+    #   2739-2870 @ nx3ny3ly0=10, incl. the long-"jittering" lx0=20/CV245.
+    BN_HI = 236                                          # narrow-band upper bound; PINNED via in-game sweep (bn=1 @CV236/2900, bn=0 @CV237/2902)
+    bw = 0 if ny == 1 else (1 if CV > 160 else 0)           # wide band: preval pos + total length
+    bn = 0 if ny == 1 else (1 if 160 < CV <= BN_HI else 0)  # narrow band: fg0 anchor
+    pre_b10 = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7)
+    pre = pre_b10 - 2 * bw                               # pre byte position (wide band)
+    pre = max(pre, len(s))                               # don't truncate decls when the declpair0 prefix (large lx0) overruns pre
+    fg0pos = max(pre + 2, pre_b10 + 110 + 2 * (declpair0 - 59) - 2 * bn)  # fg0 (narrow band; floored at pre+2)
+    s = pad_to(s, pre)
+    s += bytes([preval_signed % 256, 0])
+    s = pad_to(s, fg0pos)
+    def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+    s += grp(CV + 19, h00)
+    for j in range(ny): s += grp(33 - rInc(H[0], j), rDec(H[0], j))
+    s += clgap; nspec = 0
+    # innerX (gradual specials) = R_p[k] - min(R_p over contiguous gradual-special run)
+    Rp = [max(p[k], p[k + 1]) if k < nx - 1 else p[nx - 1] for k in range(nx)]
+    spc = [special(k) for k in range(nx)]
+    innerXa = [0] * nx
+    k = 0
+    while k < nx:
+        if spc[k] == 'grad':
+            j = k
+            while j < nx and spc[j] == 'grad': j += 1
+            rmin = min(Rp[k:j])
+            for i in range(k, j): innerXa[i] = Rp[i] - rmin
+            k = j
+        else: k += 1
+    for k in range(nx):
+        ec = EC(k)
+        orun = max(H[k][0], H[k + 1][0]) if k < nx - 1 else H[nx - 1][0]
+        oval = 164 - (p[0] if k == 0 else max(p[k - 1], p[k])) - 35 * (ny - 1)
+        sp = spc[k]
+        s += grp(oval, orun)
+        if sp:
+            nspec += 1
+            stepsz = 0 if sp == 'plat' else abs(p[k + 1] - p[k])
+            innerX = 1 if sp == 'plat' else innerXa[k]
+            for j in range(ny - 1):
+                s += grp(33 - rInc(ec, j), 0)
+                s += grp(innerX, rDec(ec, j) - rDec(ec, j + 1) + stepsz)
+            s += grp(33 - rInc(ec, ny - 1), rDec(ec, ny - 1))
+        else:
+            for j in range(ny): s += grp(33 - rInc(ec, j), rDec(ec, j))
+        if k < nx - 1: s += clgap
+    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn
+    return bytes(pad_to(s, L))
+
+
+# ── CHUNK SEAM (x-axis) ─────────────────────────────────────────────────────
+# When a surface crosses the lx=32 chunk boundary it produces TWO h3 chunks with
+# a 2-column OVERLAP (LOD/mesh continuity). Byte-exact vs seam refs 2669/2673.
+#   LOW side  (exits high edge): a normal (nx+1)-wide plate (1 forward ghost @lx32)
+#                                -> just gen_heightmap_unified with +1 column.
+#   HIGH side (enters low edge): gen_seam_high below. Decls = (R+2)-wide plate @lx-2
+#     (lead = CV(lx-2)); FG groups = (R+1)-wide plate @lx-1 (opener = CV(lx-1)+19);
+#     pre uses nx=R+2; fg0 anchors to declpair0(lx-1). R = #real columns in the chunk.
+def gen_seam_high(R, ly0=10, lz0=10, h=1, ny=2, verts=None):
+    """HIGH-side seam chunk for ANY ny, optionally carrying displacement. R = #real
+    columns; verts = per-FG-group (V0,V1) offsets in emit order (None = flat).
+    Byte-exact vs 2669/2673 (ny=2 flat) and SR1 2721 (ny=1 smooth ramp)."""
+    CVm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256       # lead decl  = CV(lx-2)
+    CVm1 = (217 - 55 * (-1) + 35 * ly0 + lz0) % 256       # opener base = CV(lx-1)
+    dp_d = (153 * (-2) + 4 * ly0 + 322) // 32             # decl prefix (declpair0 @lx-2, C=322)
+    dp_g = (153 * (-1) + 4 * ly0 + 322) // 32             # FG anchor   (declpair0 @lx-1, C=322)
+    nxd = R + 2; nxg = R + 1
+    bfs = 1 if (217 + 35 * ly0 + lz0) % 256 > 160 else 0  # align-jitter: CV(lx0=0, ly0) > 160
+    def pad_to(s, t):
+        while len(s) < t: s += bytes([255, 0])
+        return s[:t]
+    s = bytearray(bytes([0, 255]) * dp_d)
+    for xi in range(nxd):
+        if xi > 0: s += bytes([255, 0]) * 4
+        for yi in range(ny):
+            if xi == 0 and yi == 0: s += bytes([0, CVm2, 1, 2, h - 1, 0])
+            elif yi == 0: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
+            else: s += bytes([(34 - h) % 256, 1, 2, h - 1, 0])
+    pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + 2 * ((nxd - 4) // 4)  # + wide-plate floor-step (validated R=2,4,6 at ny=3)
+    pre_nb = max(pre_nb, len(s))                          # don't truncate the last decl at large R (decl region overruns formula pre)
+    s = pad_to(s, pre_nb)
+    s += bytes([(120 - CVm2 - (h - 1) - 35 * (ny - 1) + 55 * (nxd - 1)) % 256, 0])
+    fg0 = pre_nb + 110 + 2 * (dp_g - 59)
+    s = pad_to(s, fg0)
+    def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+    s += grp(CVm1 + 19, h)
+    for j in range(ny): s += grp(33 - h, h)
+    s += bytes([255, 0]) * 4
+    for k in range(nxg):
+        s += grp(164 - h - 35 * (ny - 1), h)
+        for j in range(ny): s += grp(33 - h, h)
+        if k < nxg - 1: s += bytes([255, 0]) * 4
+    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * 8 + (322 - 10 * R) + 2 * ((nxd - 4) // 4)  # + wide-plate floor-step trailing
+    s = bytearray(pad_to(s, Lnb - 2 * ny * bfs))
+    if verts:                                             # post-patch FG groups -> displaced
+        grps = [i for i in range(len(s) - 7) if s[i+1] == 1 and s[i+3] == 0x7e
+                and s[i+5] == 0x7e and s[i+7] == 0 and not (s[i+2] == 2 and s[i+4] == 0)]
+        enc = lambda d: (d + 126) % 256; gmap = {grps[k]: verts[k] for k in range(len(verts))}
+        out = bytearray(); i = 0
+        while i < len(s):
+            if i in gmap:
+                V0, V1 = gmap[i]
+                if V0 == ORIGIN and V1 == ORIGIN: out += s[i:i+8]
+                else: out += bytes([s[i], 1, s[i+2], enc(V0[0]), enc(V0[1]), enc(V0[2]),
+                                    0, enc(V1[0]), enc(V1[1]), enc(V1[2]), 0, 0])
+                i += 8
+            else: out += bytes([s[i]]); i += 1
+        s = out
+    return bytes(s)
+
+
+def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
+    """MIDDLE x-chunk: a span that ENTERS the low edge AND EXITS the high edge of
+    a chunk (the surface continues on both sides). = high-x seam (back-ghosts
+    lx-2,-1) on the low edge + a forward ghost on the high edge. h3 chunks are
+    always 32 voxels wide, so an INTERIOR middle carries exactly R=32 real columns
+    (nxd=35 decls, nxg=34 FG clusters). R<32 is the CORE-EDGE high chunk (e.g. R=30
+    for the high real chunk of a full-width fill, which back-ghosts on its low edge
+    and forward-ghosts into the high-edge ghost chunk). The wide-plate floor-step
+    (which gen_seam_high omits, being validated only at small R) is REQUIRED here
+    because at large nxd the decl region overruns the un-stepped pre position.
+    Byte-exact vs MID-1 2762 (9,8,8) at R=32/ny=1, FULLWIDTH 2777 (11,8,8) at
+    R=30/ny=1, and MID2 2779 (9,8,8) at R=32/ny=2. Flat (no displacement) so far."""
+    CVm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256       # lead decl  = CV(lx-2)
+    CVm1 = (217 - 55 * (-1) + 35 * ly0 + lz0) % 256       # opener base = CV(lx-1)
+    dp_d = (153 * (-2) + 4 * ly0 + 322) // 32
+    dp_g = (153 * (-1) + 4 * ly0 + 322) // 32
+    nxd = R + 2 + 1; nxg = R + 1 + 1                       # +1 forward ghost each
+    step = 2 * ((nxd + 1) // 5) - 2 * (ny >= 2)            # wide floor-step (ny1->14, ny>=2->-2; validated ny=1,2,4)
+    def pad_to(s, t):
+        while len(s) < t: s += bytes([255, 0])
+        return s[:t]
+    s = bytearray(bytes([0, 255]) * dp_d)
+    for xi in range(nxd):
+        if xi > 0: s += bytes([255, 0]) * 4
+        for yi in range(ny):
+            if xi == 0 and yi == 0: s += bytes([0, CVm2, 1, 2, h - 1, 0])
+            elif yi == 0: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
+            else: s += bytes([(34 - h) % 256, 1, 2, h - 1, 0])
+    pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + step
+    bumped = len(s) > pre_nb                              # decl region overruns the formula pre (higher ly0, larger dp_d)
+    pre_nb = max(pre_nb, len(s))                          # -> don't truncate the last decl
+    s = pad_to(s, pre_nb)
+    s += bytes([(120 - CVm2 - (h - 1) - 35 * (ny - 1) + 55 * (nxd - 1)) % 256, 0])
+    fg0 = pre_nb + 110 + 2 * (dp_g - 59)
+    s = pad_to(s, fg0)
+    def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+    clgap = bytes([255, 0]) * (4 - (ny >= 6))             # FG cluster gap shrinks 8B->6B at ny>=6 (matches gen_heightmap)
+    s += grp(CVm1 + 19, h)
+    for j in range(ny): s += grp(33 - h, h)
+    s += clgap
+    for k in range(nxg):
+        s += grp(164 - h - 35 * (ny - 1), h)
+        for j in range(ny): s += grp(33 - h, h)
+        if k < nxg - 1: s += clgap
+    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6)) + (322 - 10 * R) + step - 10 - 4 * bumped
+    s = bytearray(pad_to(s, Lnb))
+    if verts:                                             # post-patch FG groups -> displaced (same as gen_seam_high)
+        grps = [i for i in range(len(s) - 7) if s[i+1] == 1 and s[i+3] == 0x7e
+                and s[i+5] == 0x7e and s[i+7] == 0 and not (s[i+2] == 2 and s[i+4] == 0)]
+        enc = lambda d: (d + 126) % 256; gmap = {grps[k]: verts[k] for k in range(len(verts))}
+        out = bytearray(); i = 0
+        while i < len(s):
+            if i in gmap:
+                V0, V1 = gmap[i]
+                if V0 == ORIGIN and V1 == ORIGIN: out += s[i:i+8]
+                else: out += bytes([s[i], 1, s[i+2], enc(V0[0]), enc(V0[1]), enc(V0[2]),
+                                    0, enc(V1[0]), enc(V1[1]), enc(V1[2]), 0, 0])
+                i += 8
+            else: out += bytes([s[i]]); i += 1
+        s = out
+    return bytes(s)
+
+
+# ── CORE-EDGE GHOST CHUNKS ───────────────────────────────────────────────────
+# When a fill reaches a chunk boundary at the core's low edge, or the core's high
+# edge, DU emits a minimal GHOST chunk beyond the real range (the LOD-overlap
+# representation of the surface continuing off the filled region). Byte-exact vs
+# FULLWIDTH 2777 chunk 3 (low ghost) and chunk 12 (high ghost). ny=1 flat only;
+# CV values validated at ly0=lz0=10 (structure fixed, values scale with CV).
+def gen_low_ghost(ly0=10, lz0=10, h=1):
+    """Low-edge ghost chunk (below the low real chunk). lead = CV(lx0=0)+32."""
+    AB = lambda n: bytes([0, 255]) * n; BA = lambda n: bytes([255, 0]) * n
+    G = lambda v: bytes([v % 256, 1, h, 126, 126, 126, h, 0])
+    CV = (217 + 35 * ly0 + lz0 + 32) % 256
+    return (AB(164) + bytes([0, CV, 1, 2, h - 1]) + AB(3) + bytes([0, 23]) + AB(159)
+            + bytes([0]) + G(CV + 19) + G(33 - h) + BA(4) + G(164 - h) + G(33 - h) + BA(3))
+
+
+def gen_high_ghost(ly0=10, lz0=10, h=1):
+    """High-edge ghost chunk (above the high real chunk). lead = CV(lx-2)."""
+    AB = lambda n: bytes([0, 255]) * n
+    G = lambda v: bytes([v % 256, 1, h, 126, 126, 126, h, 0])
+    CVm2 = (217 + 110 + 35 * ly0 + lz0) % 256; CVm1 = (217 + 55 + 35 * ly0 + lz0) % 256
+    return (AB(1) + bytes([0, CVm2, 1, 2, h - 1]) + AB(165) + bytes([0, 201]) + AB(1)
+            + bytes([0]) + G(CVm1 + 19) + bytes([33 - h, 1, h, 126, 126, 126, h]) + AB(165) + bytes([0]))
+
+
+def gen_fullwidth_x(ly0=10, lz0=10, h=1):
+    """FULL M-core-width flat fill in x (game -127.5..+126.5): 10 h3 chunks (3..12).
+      3  = low-edge ghost                       (gen_low_ghost)
+      4  = low real (32 real + fwd ghost, dstep=2 for the down-ghost)
+      5-10 = 6 interior middle chunks           (gen_middle_x, R=32)
+      11 = high real (both-sides middle, R=30)  (gen_middle_x R=30)
+      12 = high-edge ghost                      (gen_high_ghost)
+    Returns {(cx,cy,cz): scan}. Byte-exact vs FULLWIDTH 2777. ny=1 flat only."""
+    cy = 8 + ly0 // 32; cz = 8 + lz0 // 32
+    out = {(3, cy, cz): gen_low_ghost(ly0, lz0, h),
+           (4, cy, cz): gen_heightmap_unified([[h]] * 33, lx0=0, ly0=ly0, lz0=lz0, dstep=2),
+           (11, cy, cz): gen_middle_x(30, ly0=ly0, lz0=lz0, h=h, ny=1),
+           (12, cy, cz): gen_high_ghost(ly0, lz0, h)}
+    for cx in range(5, 11):
+        out[(cx, cy, cz)] = gen_middle_x(32, ly0=ly0, lz0=lz0, h=h, ny=1)
+    return out
+
+
+def gen_terrain_smooth_x(corner_z, gx, ly0=10, lz0=10, h=1, ny=1):
+    """SMOOTH multi-chunk terrain crossing ANY number of x-boundaries. corner_z =
+    per x-grid-line top-vertex z-offset (len = total_cells + 1), extruded uniformly
+    in y (ny cells deep). gx = global voxel x of the footprint's low corner.
+    Splits the profile into low chunk (fwd ghost) -> middle chunk(s) (both-sides
+    ghost) -> high seam, with SHARED GHOST columns (adjacent chunks overlap in the
+    profile). Returns {(cx,cy,cz): scan}. Byte-exact vs SMID2 2783 (3-chunk z-ramp).
+    ny=1 validated; heightmap-style displacement (V0=origin, V1=(0,0,dz))."""
+    ncells = len(corner_z) - 1
+    bx = 32 * ((gx // 32) + 1)
+    n_left = bx - gx                                       # cells in low chunk
+    cxl = 8 + gx // 32; cxh = 8 + (gx + ncells - 1) // 32
+    n_right = (gx + ncells) - 32 * ((gx + ncells - 1) // 32)  # cells in high chunk
+    M = cxh - cxl - 1                                      # number of middle chunks
+    lx = gx % 32; cy = 8 + ly0 // 32; cz = 8 + lz0 // 32
+    def vts(dzs):                                          # per x-line dz -> (ny+1) verts/line
+        v = []
+        for dz in dzs:
+            for _ in range(ny + 1):
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    if cxh == cxl:                                         # no boundary: single displaced chunk
+        return {(cxl, cy, cz): gen_surface_displaced([[h] * ny] * ncells,
+                vts(corner_z), lx0=lx, ly0=ly0, lz0=lz0)}
+    out = {(cxl, cy, cz): gen_surface_displaced([[h] * ny] * (n_left + 1),
+            vts(corner_z[0:n_left + 2]), lx0=lx, ly0=ly0, lz0=lz0)}
+    for j in range(M):                                     # middle chunks (32 real cols each)
+        st = (n_left - 1) + j * 32
+        out[(cxl + 1 + j, cy, cz)] = gen_middle_x(32, ly0=ly0, lz0=lz0, h=h, ny=ny,
+                                                  verts=vts(corner_z[st:st + 35]))
+    hst = (n_left - 1) + M * 32
+    out[(cxh, cy, cz)] = gen_seam_high(n_right, ly0=ly0, lz0=lz0, h=h, ny=ny,
+                                       verts=vts(corner_z[hst:]))
+    return out
+
+
+def gen_terrain_smooth_2d(corner_z, gx, ly0=10, lz0=10, h=1):
+    """SMOOTH multi-chunk terrain with a FULL 2D offset grid (varies in both x and y).
+    corner_z = [x-line][y-line] grid: (ncells_x+1) x-lines, each a list of (ny+1)
+    top-vertex z-offsets. Crosses any number of x-boundaries (low -> middle(s) ->
+    high) with shared ghost columns; each x-line carries its own y-profile. Generalises
+    gen_terrain_smooth_x (which extrudes a 1D profile uniformly in y). Byte-exact vs
+    SMID2Dy 2795 (y-slope, ny=4). Emit order x-outer / y-inner, each corner independent."""
+    ncells = len(corner_z) - 1; ny = len(corner_z[0]) - 1
+    bx = 32 * ((gx // 32) + 1); n_left = bx - gx
+    cxl = 8 + gx // 32; cxh = 8 + (gx + ncells - 1) // 32
+    n_right = (gx + ncells) - 32 * ((gx + ncells - 1) // 32)
+    M = cxh - cxl - 1; lx = gx % 32; cy = 8 + ly0 // 32; cz = 8 + lz0 // 32
+    def vts(xlines):                                      # each x-line = list of (ny+1) dz
+        v = []
+        for yprof in xlines:
+            for dz in yprof:
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    if cxh == cxl:
+        return {(cxl, cy, cz): gen_surface_displaced([[h] * ny] * ncells,
+                vts(corner_z), lx0=lx, ly0=ly0, lz0=lz0)}
+    out = {(cxl, cy, cz): gen_surface_displaced([[h] * ny] * (n_left + 1),
+            vts(corner_z[0:n_left + 2]), lx0=lx, ly0=ly0, lz0=lz0)}
+    for j in range(M):
+        st = (n_left - 1) + j * 32
+        out[(cxl + 1 + j, cy, cz)] = gen_middle_x(32, ly0=ly0, lz0=lz0, h=h, ny=ny,
+                                                  verts=vts(corner_z[st:st + 35]))
+    hst = (n_left - 1) + M * 32
+    out[(cxh, cy, cz)] = gen_seam_high(n_right, ly0=ly0, lz0=lz0, h=h, ny=ny,
+                                       verts=vts(corner_z[hst:]))
+    return out
+
+
+def gen_terrain_smooth_grid(grid, gx, gy, lz0=10, h=1):
+    """SMOOTH 2D terrain over a full chunk grid, crossing ANY number of x-boundaries
+    AND (up to) one y-boundary. grid = [x-line][y-line] top-vertex z-offsets
+    ((ncells_x+1) x-lines, each (ncells_y+1) y-offsets). Composes the 6-way chunk grid:
+    y-low row [corner-low | x-middle(s) | x-high] with a y-forward-ghost, and y-high row
+    [x-fwd-ghost y-seam | corner-middle(s) | 2-axis corner]. Shared ghost columns AND
+    rows (adjacent slices overlap). Byte-exact vs SMID2AX 2825. Falls back to
+    gen_terrain_smooth_2d when there's no y-boundary."""
+    ncells = len(grid) - 1; ny = len(grid[0]) - 1
+    bx = 32 * ((gx // 32) + 1); by = 32 * ((gy // 32) + 1)
+    ycross = gy < by <= gy + ny - 1
+    cxl, cyl = 8 + gx // 32, 8 + gy // 32
+    cxh = 8 + (gx + ncells - 1) // 32
+    lx, ly = gx % 32, gy % 32; cz = 8 + lz0 // 32
+    def vts(xslice, y0, y1):                              # per (x-line, y-line) verts, x-outer/y-inner
+        v = []
+        for xl in xslice:
+            for yl in range(y0, y1):
+                dz = xl[yl]
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    if not ycross or (gy + ny) > by + 32:                # no y-boundary (or multi-y unsupported)
+        return gen_terrain_smooth_2d([grid[x] for x in range(len(grid))], gx, ly0=ly, lz0=lz0, h=h)
+    nL = bx - gx; Rx = (gx + ncells) - 32 * ((gx + ncells - 1) // 32)
+    nLy = by - gy; Ry = (gy + ny) - by; M = cxh - cxl - 1
+    hst = (nL - 1) + M * 32
+    out = {}
+    # y-LOW row (y-forward-ghost -> ny=nLy+1; y-lines [0 : nLy+2])
+    out[(cxl, cyl, cz)] = gen_surface_displaced([[h] * (nLy + 1)] * (nL + 1),
+        vts(grid[0:nL + 2], 0, nLy + 2), lx0=lx, ly0=ly, lz0=lz0)
+    for j in range(M):
+        st = (nL - 1) + j * 32
+        out[(cxl + 1 + j, cyl, cz)] = gen_middle_x(32, ly0=ly, lz0=lz0, h=h, ny=nLy + 1,
+                                                   verts=vts(grid[st:st + 35], 0, nLy + 2))
+    out[(cxh, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=nLy + 1,
+                                        verts=vts(grid[hst:], 0, nLy + 2))
+    # y-HIGH row (y-seam back-ghost, Ry real rows; y-lines [nLy-1 : ny+1])
+    out[(cxl, cyl + 1, cz)] = gen_seam_high_y(Ry, nL + 1, lx0=lx, lz0=lz0, h=h,
+        x_fwd_ghost=True, verts=vts(grid[0:nL + 2], nLy - 1, ny + 1))
+    for j in range(M):
+        st = (nL - 1) + j * 32
+        out[(cxl + 1 + j, cyl + 1, cz)] = gen_corner_middle(Ry, lz0=lz0, h=h,
+                                                            verts=vts(grid[st:st + 35], nLy - 1, ny + 1))
+    out[(cxh, cyl + 1, cz)] = gen_corner_hh(Rx, Ry, lz0=lz0, h=h,
+                                            verts=vts(grid[hst:], nLy - 1, ny + 1))
+    return out
+
+
+def gen_terrain_smooth_y(corner_z, gy, nx=1, lx0=10, lz0=10, h=1):
+    """SMOOTH multi-chunk terrain crossing ANY number of Y-boundaries (row-direction
+    mirror of gen_terrain_smooth_x). corner_z = per y-grid-line top-vertex z-offset
+    (len = total_rows+1), uniform across the nx columns. gy = global voxel y of the
+    footprint's low corner. Splits into low chunk (fwd ghost) -> y-middle(s) -> high
+    y-seam with shared ghost rows. Byte-exact vs SMIDY 2789 (3-chunk z-ramp along Y).
+    nx=1 validated (matches gen_middle_y scope)."""
+    nrows = len(corner_z) - 1
+    by = 32 * ((gy // 32) + 1)
+    n_low = by - gy                                        # rows in low-y chunk
+    cyl = 8 + gy // 32; cyh = 8 + (gy + nrows - 1) // 32
+    n_high = (gy + nrows) - 32 * ((gy + nrows - 1) // 32)  # rows in high-y chunk
+    M = cyh - cyl - 1                                      # number of y-middle chunks
+    ly_start = gy % 32; cx = 8 + lx0 // 32; cz = 8 + lz0 // 32
+    def vts(dzs):                                          # (nx+1) x-lines, uniform in x
+        v = []
+        for _ in range(nx + 1):
+            for dz in dzs:
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    if cyh == cyl:
+        return {(cx, cyl, cz): gen_surface_displaced([[h] * nrows] * nx,
+                vts(corner_z), lx0=lx0, ly0=ly_start, lz0=lz0)}
+    out = {(cx, cyl, cz): gen_surface_displaced([[h] * (n_low + 1)] * nx,
+            vts(corner_z[0:n_low + 2]), lx0=lx0, ly0=ly_start, lz0=lz0)}
+    for j in range(M):
+        st = (n_low - 1) + j * 32
+        out[(cx, cyl + 1 + j, cz)] = gen_middle_y(nx=nx, lx0=lx0, lz0=lz0, h=h,
+                                                  verts=vts(corner_z[st:st + 35]))
+    hst = (n_low - 1) + M * 32
+    out[(cx, cyh, cz)] = gen_seam_high_y(n_high, nx, lx0=lx0, lz0=lz0, h=h,
+                                         verts=vts(corner_z[hst:]))
+    return out
+
+
+def gen_terrain_xramp(corner_z, n_left, ny=1, ly0=10, lz0=10, h=1):
+    """A continuous smooth surface (ny cells deep) crossing the lx=32 x-seam.
+    corner_z = per x-grid-line z-offset (len = total_cells + 1, extruded uniformly
+    in y); n_left = cells in the low chunk.
+    Returns {0: low_scan, 1: high_scan}. Both chunks share the overlap offsets.
+    Byte-exact vs SR1 2721 (corner_z=[0,-21,-42,-63,-84], n_left=2)."""
+    ncells = len(corner_z) - 1; n_right = ncells - n_left
+    left_lx = 32 - n_left
+    def vts(dzs):
+        v = []
+        for dz in dzs:
+            for _ in range(ny + 1):                       # (ny+1) y-grid-lines per x-line
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    low = gen_surface_displaced([[h] * ny] * (n_left + 1), vts(corner_z[:n_left + 2]),
+                                lx0=left_lx, ly0=ly0, lz0=lz0)
+    high = gen_seam_high(n_right, ly0=ly0, lz0=lz0, h=h, ny=ny,
+                         verts=vts(corner_z[n_left - 1:]))
+    return {0: low, 1: high}
+
+
+# ── VERTEX DISPLACEMENT (smooth surfaces: wedge / ramp / sphere) ─────────────
+# Each surface corner-group holds up to TWO stacked vertices (bottom V0, top V1)
+# at that footprint position. Flat = the inert [7e 7e 7e, run2, 00]; displaced =
+# [V0(dx,dy,dz), 00, V1(dx,dy,dz), 00, 00]. Offsets are byte-126 per axis:
+# 126 = origin, range +-126, cube edge = 84 steps (so +-42 = half cell, the wedge).
+# Byte-exact vs W1/W3/W4 (2679/2683/2685) and 2687 (full 8-corner manip).
+ORIGIN = (0, 0, 0)
+
+
+def gen_voxel_displaced(corners, lx0=10, ly0=10, lz0=10, h=1):
+    """One deformed surface voxel. `corners` = list of 4 (V0, V1) for the footprint
+    corners in order [(-X,-Y), (-X,+Y), (+X,-Y), (+X,+Y)]; V0 = bottom corner,
+    V1 = top corner; each V = (dx,dy,dz) offset (ORIGIN = no move). Range +-126."""
+    b = gen_heightmap_unified([[h]], lx0=lx0, ly0=ly0, lz0=lz0)
+    grps = [i for i in range(len(b) - 7)
+            if b[i+1] == 1 and b[i+3] == 0x7e and b[i+5] == 0x7e and b[i+7] == 0
+            and not (b[i+2] == 2 and b[i+4] == 0)]
+    assert len(grps) == 4, f"expected 4 corner groups, got {len(grps)}"
+    enc = lambda d: (d + 126) % 256
+    gmap = {grps[k]: corners[k] for k in range(4)}
+    out = bytearray(); i = 0
+    while i < len(b):
+        if i in gmap:
+            V0, V1 = gmap[i]
+            if V0 == ORIGIN and V1 == ORIGIN:
+                out += b[i:i+8]                                   # flat, unchanged
+            else:
+                out += bytes([b[i], 1, b[i+2],
+                              enc(V0[0]), enc(V0[1]), enc(V0[2]), 0,
+                              enc(V1[0]), enc(V1[1]), enc(V1[2]), 0, 0])
+            i += 8
+        else:
+            out += bytes([b[i]]); i += 1
+    return bytes(out)
+
+
+# Wedge presets: low-side corners drop (horizontal +-42, dz -42); ridge stays flat.
+# Orientation = which way it slopes DOWN. Corner order [(-X,-Y),(-X,+Y),(+X,-Y),(+X,+Y)].
+WEDGE = {
+    '+x': [ORIGIN_ := (ORIGIN, ORIGIN), ORIGIN_, (ORIGIN, (-42, 0, -42)), (ORIGIN, (-42, 0, -42))],
+    '-x': [(ORIGIN, (42, 0, -42)), (ORIGIN, (42, 0, -42)), ORIGIN_, ORIGIN_],
+    '-y': [(ORIGIN, (0, 42, -42)), ORIGIN_, (ORIGIN, (0, 42, -42)), ORIGIN_],
+    '+y': [ORIGIN_, (ORIGIN, (0, -42, -42)), ORIGIN_, (ORIGIN, (0, -42, -42))],
+}
+
+
+def gen_wedge(direction='+x', lx0=10, ly0=10, lz0=10):
+    """A single wedge voxel sloping DOWN toward `direction` (+x/-x/+y/-y)."""
+    return gen_voxel_displaced(WEDGE[direction], lx0=lx0, ly0=ly0, lz0=lz0)
+
+
+# ── SMOOTH SURFACES (continuous displacement) ───────────────────────────────
+# Displacement is a property of GRID CORNERS (vertices), not cells: an nx*ny
+# footprint has (nx+1)*(ny+1) corners = exactly the FG-group count, and adjacent
+# cells SHARE a corner's offset (stored once). So a smooth surface = the heightmap
+# framework + one (V0_bottom, V1_top) offset per corner-group (emit order =
+# column-major: x0(y0..yN), x1(y0..yN), ...). Byte-exact vs ramps 2689(x)/2691(y).
+def gen_surface_displaced(H, verts, lx0=10, ly0=10, lz0=10):
+    """H = heightmap (base surface); verts = list of (V0,V1) per FG group/grid corner
+    in emit order; each V = (dx,dy,dz) offset (ORIGIN = no move). Range +-126, cube 84."""
+    b = gen_heightmap_unified(H, lx0=lx0, ly0=ly0, lz0=lz0)
+    grps = [i for i in range(len(b) - 7)
+            if b[i+1] == 1 and b[i+3] == 0x7e and b[i+5] == 0x7e and b[i+7] == 0
+            and not (b[i+2] == 2 and b[i+4] == 0)]
+    assert len(grps) == len(verts), f"{len(grps)} groups vs {len(verts)} verts"
+    enc = lambda d: (d + 126) % 256
+    gmap = {grps[k]: verts[k] for k in range(len(verts))}
+    out = bytearray(); i = 0
+    while i < len(b):
+        if i in gmap:
+            V0, V1 = gmap[i]
+            if V0 == ORIGIN and V1 == ORIGIN:
+                out += b[i:i+8]
+            else:
+                out += bytes([b[i], 1, b[i+2],
+                              enc(V0[0]), enc(V0[1]), enc(V0[2]), 0,
+                              enc(V1[0]), enc(V1[1]), enc(V1[2]), 0, 0])
+            i += 8
+        else:
+            out += bytes([b[i]]); i += 1
+    return bytes(out)
+
+
+def gen_linear_ramp(ncells, drop_cells=1, ny=1, lx0=10, ly0=10, lz0=10):
+    """A continuous linear smooth ramp: `ncells` cells long (x), dropping
+    `drop_cells` over the run, `ny` cells deep. Each grid corner's top vertex
+    drops V1.z = -(84*drop/ncells)*i (sheared/parallelogram). Byte-exact vs 2700."""
+    per = 84.0 * drop_cells / ncells
+    verts = []
+    for i in range(ncells + 1):
+        dz = round(-per * i)
+        for _ in range(ny + 1):
+            verts.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+    H = [[1] * ny for _ in range(ncells)]
+    return gen_surface_displaced(H, verts, lx0=lx0, ly0=ly0, lz0=lz0)
+
+
+def gen_smooth_surface(corner_z, lx0=10, ly0=10, lz0=10):
+    """Arbitrary smooth heightmap. corner_z = (nx+1) x (ny+1) grid of top-vertex
+    z-offsets in 84-steps (<=0 = down, 84 = one voxel). Offsets compose ADDITIVELY
+    per corner (x-slope + y-slope), confirmed in-game. Byte-exact vs 2700 + the 3x3
+    diagonal tilt; the tilt rendered perfectly as a flat plane (novel, un-referenced)."""
+    nx = len(corner_z) - 1
+    ny = len(corner_z[0]) - 1
+    verts = []
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            dz = corner_z[i][j]
+            verts.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+    H = [[1] * ny for _ in range(nx)]
+    return gen_surface_displaced(H, verts, lx0=lx0, ly0=ly0, lz0=lz0)
+
+
+def gen_terrain_2dseam(corner_z, n_left, ly0=10, lz0=10, h=1):
+    """A continuous smooth surface sloping in BOTH x and y while crossing the lx=32
+    x-seam. corner_z[i][j] = z-offset at x-grid-line i, y-grid-line j
+    (len = (total_cells+1) x (ny+1)); n_left = cells in the low chunk. Both chunks
+    share the overlap. Byte-exact vs SR1/flat-seam in their uniform-y forms."""
+    ncells = len(corner_z) - 1; n_right = ncells - n_left
+    ny = len(corner_z[0]) - 1; left_lx = 32 - n_left
+    def vts(rows):
+        v = []
+        for row in rows:
+            for dz in row:
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    low = gen_surface_displaced([[h] * ny] * (n_left + 1), vts(corner_z[:n_left + 2]),
+                                lx0=left_lx, ly0=ly0, lz0=lz0)
+    high = gen_seam_high(n_right, ly0=ly0, lz0=lz0, h=h, ny=ny,
+                         verts=vts(corner_z[n_left - 1:]))
+    return {0: low, 1: high}
+
+
+def _fg0(g):
+    """First FG group offset (flat 8-byte OR displaced 12-byte)."""
+    i = 0
+    while i <= len(g) - 8:
+        if g[i+1] == 1 and g[i] not in (0, 255) and not (g[i+2] == 2 and g[i+4] == 0):
+            if g[i+3] == 0x7e and g[i+5] == 0x7e and g[i+7] == 0: return i
+            if i + 12 <= len(g) and g[i+6] == 0 and g[i+10] == 0 and g[i+11] == 0: return i
+        i += 1
+    return len(g)
+
+
+def _fg_region(g):
+    """Bytes of the FG-group region (fg0 .. last group end), flat or displaced groups."""
+    f0 = _fg0(g); last = f0; i = f0
+    while i <= len(g) - 8:
+        if g[i+1] == 1 and g[i] not in (0, 255) and not (g[i+2] == 2 and g[i+4] == 0):
+            if g[i+3] == 0x7e and g[i+5] == 0x7e and g[i+7] == 0: last = i + 8; i += 8; continue
+            if i + 12 <= len(g) and g[i+6] == 0 and g[i+10] == 0 and g[i+11] == 0: last = i + 12; i += 12; continue
+        i += 1
+    return g[f0:last]
+
+
+def gen_seam_high_y(R, nx, lx0=10, lz0=10, h=1, verts=None, x_fwd_ghost=False):
+    """HIGH-side chunk of a Y-axis seam: nx real columns, R real ROWS, back-ghost
+    rows ly-1,ly-2. Row-direction analog of gen_seam_high. Decls from nx x (R+2)
+    plate @ly-2 (lead CV(ly-2)); FG from nx x (R+1) plate @ly-1 (opener CV(ly-1)+19),
+    optionally displaced via verts. Byte-exact vs YS1 2729; smooth hardware-validated.
+    x_fwd_ghost=True (this y-seam is the x-LOW chunk of a multi-x 2D patch, so its top
+    x-column is a forward ghost): suppresses the ybfs align-jitter (byte-exact vs MID2AX
+    2808 (8,9,8) at lx0=30; the ybfs=1 branch was unvalidated and mis-fires at high lx0)."""
+    base_decl = gen_heightmap_unified([[h] * (R + 2)] * nx, lx0=lx0, ly0=-2, lz0=lz0)
+    base_fg = (gen_surface_displaced([[h] * (R + 1)] * nx, verts, lx0=lx0, ly0=-1, lz0=lz0)
+               if verts else gen_heightmap_unified([[h] * (R + 1)] * nx, lx0=lx0, ly0=-1, lz0=lz0))
+    fgr = _fg_region(base_fg)
+    ybfs = 0 if x_fwd_ghost else (1 if (217 - 55 * lx0 + lz0) % 256 < 160 else 0)  # y-seam align-jitter: CV(lx0, ly=0) < 160
+    de = 0; i = 0                                          # last decl end in base_decl
+    while i < len(base_decl) - 5:
+        if base_decl[i+1] == 1 and base_decl[i+2] == 2 and base_decl[i+4] == 0 and base_decl[i] not in (0, 255):
+            de = i + 5; i += 5
+        else: i += 1
+    head = base_decl[:de] + (bytes([255, 0]) if ybfs else b"") + base_decl[de:_fg0(base_decl)]
+    s = bytearray(head + fgr)
+    Ltot = len(base_decl) - len(_fg_region(base_decl)) + len(fgr) + 4 * ybfs
+    while len(s) < Ltot: s += bytes([255, 0])
+    return bytes(s[:Ltot])
+
+
+def gen_corner_middle(Ry, lz0=10, h=1, verts=None):
+    """CORNER-MIDDLE chunk: an x-MIDDLE that is also a y-SEAM-high (2D patch interior
+    where an x-middle column meets a y-boundary). = the y-seam splice (like
+    gen_seam_high_y) applied to gen_middle_x instead of gen_heightmap: decls from the
+    x-middle at ny=Ry+2 rows @ly-2, FG from the x-middle at ny=Ry+1 rows @ly-1. Always
+    R=32 x-columns (full x-middle). ybfs fires here (unlike the x-fwd-ghost y-seam).
+    Byte-exact vs MID2AX 2808 (9,9,8) at Ry=2. Flat (verts wiring pending)."""
+    base_decl = gen_middle_x(32, ly0=-2, lz0=lz0, h=h, ny=Ry + 2)
+    base_fg = gen_middle_x(32, ly0=-1, lz0=lz0, h=h, ny=Ry + 1, verts=verts)
+    fgr = _fg_region(base_fg)
+    de = 0; i = 0
+    while i < len(base_decl) - 5:
+        if base_decl[i+1] == 1 and base_decl[i+2] == 2 and base_decl[i+4] == 0 and base_decl[i] not in (0, 255):
+            de = i + 5; i += 5
+        else: i += 1
+    head = base_decl[:de] + bytes([255, 0]) + base_decl[de:_fg0(base_decl)]   # ybfs=1 insertion
+    s = bytearray(head + fgr)
+    Ltot = len(base_decl) - len(_fg_region(base_decl)) + len(fgr) + 4 + 2      # +4 ybfs, +2 corner-middle
+    while len(s) < Ltot: s += bytes([255, 0])
+    return bytes(s[:Ltot])
+
+
+def gen_double_middle(lz0=10, h=1, verts=None):
+    """DOUBLE-MIDDLE chunk: an x-MIDDLE that is ALSO a y-MIDDLE (both-sides ghost in
+    BOTH axes) -- the interior chunk of a landscape spanning >=3 chunks in each of x
+    and y. = gen_corner_middle(Ry=33) (the y-seam splice of gen_middle_x at the
+    y-middle's ny=35/34) with the y-middle forward-ghost transform: remove ALL the FG
+    clgap 00ff-x3 AND decl-gap 00ff-x4 runs (the fwd ghost merges every gap). 35x35
+    decls. Byte-exact vs MID2D33 2848 (9,9,8)."""
+    g = bytearray(gen_corner_middle(33, lz0=lz0, h=h, verts=verts))
+    runs = []; i = 0
+    while i < len(g):
+        if g[i:i+2] == bytes([0, 255]):
+            j = i
+            while g[j:j+2] == bytes([0, 255]): j += 2
+            runs.append((i, (j - i) // 2)); i = j
+        else: i += 1
+    for a, n in sorted(runs, reverse=True):                # remove all 00ff-x3 and 00ff-x4 gaps
+        if n in (3, 4): del g[a:a + 2 * n]
+    return bytes(g)
+
+
+def _abruns(g):
+    r = []; i = 0
+    while i < len(g):
+        if g[i:i+2] == bytes([0, 255]):
+            j = i
+            while g[j:j+2] == bytes([0, 255]): j += 2
+            r.append((i, (j - i) // 2)); i = j
+        else: i += 1
+    return r
+
+
+def gen_ymid_xlow(nL, lx0, lz0=10, h=1, verts=None):
+    """y-MIDDLE chunk at the x-LOW position (a y-middle whose top x-column is a forward
+    ghost) -- the left edge of the y-middle row in a large 2D patch. = gen_middle_y at
+    nx=nL+1, lx0, then grow the largest 00ff background run by 4 pairs and remove the two
+    00ff-x4 decl gaps. Byte-exact vs 2848/2854/2856 (nL=2,4,6). nL even validated."""
+    g = bytearray(gen_middle_y(nx=nL + 1, lx0=lx0, lz0=lz0, h=h, verts=verts))
+    runs = _abruns(g); mx = max(n for _, n in runs); biggest = [a for a, n in runs if n == mx][0]
+    ops = [(a, 'del') for a, n in runs if n == 4] + [(biggest, 'grow')]
+    for a, kind in sorted(ops, reverse=True):
+        if kind == 'del': del g[a:a + 8]
+        else: g[a:a] = bytes([0, 255]) * 4
+    return bytes(g)
+
+
+def gen_ymid_xhigh(Rx, lz0=10, h=1, verts=None):
+    """y-MIDDLE chunk at the x-HIGH position (a y-middle that also back-ghosts the x-seam)
+    -- the right edge of the y-middle row. = gen_corner_hh(Rx, 33) then remove the (2Rx+2)
+    00ff-x3 clgaps and shrink the two big background runs to T = 158 - 5*Rx + (Rx>=6).
+    Byte-exact vs 2848/2850/2852 (Rx=2,4,6). Rx even validated (odd/Rx>6 untested)."""
+    g = bytearray(gen_corner_hh(Rx, 33, lz0=lz0, h=h, verts=verts))
+    runs = _abruns(g); T = 158 - 5 * Rx + (Rx >= 6)
+    big2 = sorted([(n, a) for a, n in runs], reverse=True)[:2]
+    ops = [(a, 2 * (n - T)) for n, a in big2] + [(a, 6) for a, n in runs if n == 3]
+    for a, cnt in sorted(ops, reverse=True): del g[a:a + cnt]
+    return bytes(g)
+
+
+def gen_middle_y(nx=1, lx0=10, lz0=10, h=1, verts=None):
+    """MIDDLE y-chunk: a span that ENTERS the low-y edge AND EXITS the high-y edge
+    (surface continues on both sides in Y). Row-direction analog of gen_middle_x.
+    h3 chunks are always 32 rows, so a y-middle carries R=32 real rows. Content is
+    byte-identical to gen_seam_high_y(R+1=33); the forward-ghost row only reshapes
+    PADDING: remove the (2*nx-1) FG clgap 00ff-x3 runs (the forward ghost merges them)
+    and shrink the two long background 00ff runs by 4 pairs each -- EXCEPT nx=4, which
+    shrinks 3 pairs (the fwd ghost shifts gen_heightmap's wide-plate floor-step one nx
+    earlier, so base steps at nx=5 but the y-middle steps at nx=4). Byte-exact vs MIDY-NX
+    nx=1..8 (2787/2830/2844/2846/2836/2838/2840/2842; the nx=3 CV jitter in the original
+    2832 was a build slip, disproven by rebuild 2844). nx>8: floor-step may recur."""
+    g = bytearray(gen_seam_high_y(33, nx, lx0=lx0, lz0=lz0, h=h, verts=verts))
+    runs = []; i = 0                                       # maximal 00ff runs (start, pairs)
+    while i < len(g):
+        if g[i:i+2] == bytes([0, 255]):
+            j = i
+            while g[j:j+2] == bytes([0, 255]): j += 2
+            runs.append((i, (j - i) // 2)); i = j
+        else: i += 1
+    mx = max(n for _, n in runs)
+    shrink = 8 - 2 * (nx == 4)                             # bytes: 4 pairs (3 at the nx=4 floor-step)
+    ops = sorted([(a, shrink) for a, n in runs if n == mx] +   # two long bg runs
+                 [(a, 6) for a, n in runs if n == 3], reverse=True)  # (2nx-1) FG clgaps removed
+    for a, cnt in ops: del g[a:a + cnt]
+    return bytes(g)
+
+
+def gen_terrain_yramp(corner_z, n_low, nx, lx0=10, lz0=10, h=1):
+    """A continuous smooth surface (nx cols wide) crossing the lx-fixed Y-seam at
+    y=32. corner_z = per y-grid-line z-offset (len = total_rows+1, uniform in x);
+    n_low = rows in the low-y chunk. Returns {0: low_scan, 1: high_scan}."""
+    nrows = len(corner_z) - 1; R = nrows - n_low; ly_start = 32 - n_low
+    def vts(dzs):
+        v = []
+        for _ in range(nx + 1):                       # x-grid-lines (uniform in x)
+            for dz in dzs:
+                v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+        return v
+    low = gen_surface_displaced([[h] * (n_low + 1)] * nx, vts(corner_z[:n_low + 2]),
+                                lx0=lx0, ly0=ly_start, lz0=lz0)
+    high = gen_seam_high_y(R, nx, lx0=lx0, lz0=lz0, h=h, verts=vts(corner_z[n_low - 1:]))
+    return {0: low, 1: high}
+
+
+def gen_seam_high_z(R, lx0=10, ly0=10, nx=1, ny=1):
+    """UPPER chunk of a Z-axis seam: a column (nx x ny footprint) tall enough to span
+    z=32, with R real voxels above the boundary + back-ghost voxels at lz-1,lz-2.
+    Same splice as gen_seam_high, applied to the column HEIGHT: decls from height R+2
+    @lz-2 (lead CV(lz-2)); FG from height R+1 @lz-1 (opener CV(lz-1)+19). Byte-exact
+    vs ZS1 2733. (Lower chunk is just gen_heightmap_unified([[n_low+1]] footprint, base lz.)"""
+    base_decl = gen_heightmap_unified([[R + 2] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-2)
+    base_fg = gen_heightmap_unified([[R + 1] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1)
+    fgr = _fg_region(base_fg)
+    s = bytearray(base_decl[:_fg0(base_decl)] + fgr)
+    Ltot = len(base_decl) - len(_fg_region(base_decl)) + len(fgr)
+    while len(s) < Ltot: s += bytes([255, 0])
+    return bytes(s[:Ltot])
+
+
+def _flat_groups(s):
+    """Start indices of 8-byte flat FG groups [val,1,run,7e,7e,7e,run,0] in the FG region."""
+    f0 = _fg0(s); gs = []; i = f0
+    while i <= len(s) - 8:
+        if s[i+1] == 1 and s[i+3] == 0x7e and s[i+5] == 0x7e and s[i+7] == 0 \
+           and s[i] not in (0, 255) and not (s[i+2] == 2 and s[i+4] == 0):
+            gs.append(i); i += 8
+        else: i += 1
+    return gs
+
+
+def _zgrp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+
+
+# ── z=0 OCTANT SEAM (positive/negative Z half-spaces meet at z=0) ───────────────
+# Distinct from gen_seam_high_z (which crosses the INTRA-octant z=32 boundary). A
+# solid patch straddling z=0 -> two chunks: HIGH (cz=8, +Z side) and LOW (cz=7, -Z).
+# Each chunk's z-depth = its own real layer count + 1 boundary ghost (2-cell overlap).
+# Byte-exact vs 2906/2935/2937 (depth-2 sym, 2x2/3x3/4x4) + 2910 (depth-4 HIGH).
+def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2):
+    """+Z chunk of a z=0 seam. depth = (#real +Z layers) + 1 ghost. Base plate is
+    evaluated at lz0=-1 (ghost below the boundary -> CV-1 throughout); INTERIOR
+    x-columns take the special-cluster form (each of the first ny-1 groups expands to
+    (val,0)+(innerX,0), innerX = depth-2). Edge columns stay flat."""
+    g = gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1)
+    gs = _flat_groups(g); f0 = _fg0(g); inner = depth - 2
+    gvals = [(g[i], g[i+2]) for i in gs]; per = 1 + ny
+    clgap = bytes([255, 0]) * (4 - (ny >= 6))
+    fg = bytearray(); idx = 0
+    for c in range(nx + 1):
+        ov, orr = gvals[idx]; idx += 1; fg += _zgrp(ov, orr)
+        content = gvals[idx:idx + ny]; idx += ny
+        if 1 <= c <= nx - 1:                              # interior column -> special form
+            for k in range(ny - 1):
+                fg += _zgrp(content[k][0], 0) + _zgrp(inner, 0)
+            fg += _zgrp(*content[ny - 1])
+        else:
+            for v, r in content: fg += _zgrp(v, r)
+        if c < nx: fg += clgap
+    return bytes(g[:f0]) + bytes(fg) + bytes(g[gs[-1] + 8:])
+
+
+def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
+    """-Z chunk of a z=0 seam (negative octant, cz_neg=True; lz0 = its own local z,
+    31 for the Z=-0.5 layer). depth = (#real -Z layers) + 1 ghost. Interior x-columns
+    do an IN-PLACE transform: first group run->0 (value kept); remaining groups value
+    ->33 (up-facing ghost) with runs->0 except the last. Simpler than the HIGH side."""
+    g = bytearray(gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=lz0, cz_neg=True))
+    gs = _flat_groups(g); per = 1 + ny
+    for c in range(1, nx):                                # interior columns
+        b = c * per
+        for k in range(ny):
+            gi = gs[b + 1 + k]
+            if k == 0:
+                g[gi+2] = 0; g[gi+6] = 0                  # first: run->0, value kept
+            else:
+                g[gi] = 33                                # up-facing ghost value
+                if k < ny - 1: g[gi+2] = 0; g[gi+6] = 0   # run->0 except last
+    return bytes(g)
+
+
+# ── x=0 / y=0 OCTANT SEAMS (spatial column/row axes) ────────────────────────────
+# Unlike z=0 (depth axis -> special clusters), a shape straddling x=0 or y=0 makes
+# two chunks that are just PLAIN plates evaluated at the ghost position (one step
+# into the negative half: lx0/ly0 = -1 for the +side chunk, 31 for the -side chunk).
+# y=0 is exactly that. x=0 (primary scan axis) additionally forces the octant-edge
+# base-position jitter (pre/fg0 -2, L -4). Byte-exact vs 2941 (x=0) / 2943 (y=0).
+def gen_seam_y0_high(nx, ly0_ghost=-1, lz0=10):
+    """+Y chunk (cy=8) of a y=0 seam: nx cols, 1 real row (y=0.5) + ghost row (y=-0.5).
+    = plain (nx x 2) plate at ly0=-1. Byte-exact vs 2943 (8,8,8)."""
+    return gen_heightmap_unified([[1] * 2] * nx, lx0=10, ly0=ly0_ghost, lz0=lz0)
+
+
+def gen_seam_y0_low(nx, ly0_low=31, lz0=10):
+    """-Y chunk (cy=7) of a y=0 seam: plain (nx x 2) mirror plate at ly0=31. Byte-exact vs 2943 (8,7,8)."""
+    return gen_heightmap_unified([[1] * 2] * nx, lx0=10, ly0=ly0_low, lz0=lz0)
+
+
+def _x0_jitter(g):
+    """Apply the octant-edge base-position jitter to an x=0 ghost-plate: drop one
+    00ff pad pair before the preval (pre/fg0 -2) and one trailing pair (L -4 total)."""
+    g = bytearray(g); f0 = _fg0(g); pv = None
+    for i in range(f0 - 2, 0, -2):
+        if g[i+1] == 0 and g[i] not in (0, 255) and g[i] != 1: pv = i; break
+    del g[pv-2:pv]; del g[-2:]
+    return bytes(g)
+
+
+def gen_seam_x0_high(ny, ly0=10, lz0=10):
+    """+X chunk (cx=8) of an x=0 seam: 1 real col (x=0.5) + ghost col (x=-0.5).
+    = 2-wide plate at the ghost col lx0=-1, plus the octant-edge jitter. Byte-exact vs 2941 (8,8,8)."""
+    return _x0_jitter(gen_heightmap_unified([[1] * ny] * 2, lx0=-1, ly0=ly0, lz0=lz0))
+
+
+def gen_seam_x0_low(ny, ly0=10, lz0=10):
+    """-X chunk (cx=7) of an x=0 seam: 2-wide plate at lx0=31 + the octant-edge jitter. Byte-exact vs 2941 (7,8,8)."""
+    return _x0_jitter(gen_heightmap_unified([[1] * ny] * 2, lx0=31, ly0=ly0, lz0=lz0))
+
+
+def _last_decl_end(s):
+    de = 0; i = 0
+    while i < len(s) - 5:
+        if s[i+1] == 1 and s[i+2] == 2 and s[i+4] == 0 and s[i] not in (0, 255):
+            de = i + 5; i += 5
+        else: i += 1
+    return de
+
+
+def gen_corner_hh(Rx, Ry, lz0=10, h=1, verts=None):
+    """The HIGH-x HIGH-y chunk of a 2-axis (x & y) corner: Rx real cols, Ry real
+    rows, with back-ghosts on BOTH axes. Decls from an (Rx+2)x(Ry+2) plate @(-2,-2);
+    FG (and trailing) from an (Rx+1)x(Ry+1) plate @(-1,-1), optionally displaced via
+    verts (per-FG-group (V0,V1), (Rx+2)x(Ry+2) grid corners). Byte-exact vs CR1 (9,9)."""
+    bd = gen_heightmap_unified([[h] * (Ry + 2)] * (Rx + 2), lx0=-2, ly0=-2, lz0=lz0)
+    bf = (gen_surface_displaced([[h] * (Ry + 1)] * (Rx + 1), verts, lx0=-1, ly0=-1, lz0=lz0)
+          if verts else gen_heightmap_unified([[h] * (Ry + 1)] * (Rx + 1), lx0=-1, ly0=-1, lz0=lz0))
+    pre_b10 = 340 + 3 * (Rx + 1) + 5 * (Rx + 2) * (Ry + 1) + 2 * ((Rx + 1) // 4)  # + x wide-plate floor-step for the (Rx+2)-col plate
+    CVm2 = (217 - 55 * (-2) + 35 * (-2) + lz0) % 256
+    preval = (120 - CVm2 - (h - 1) - 35 * (Ry + 1) + 55 * (Rx + 1)) % 256
+    fgr = _fg_region(bf)
+    s = bytearray(bd[:_last_decl_end(bd)])
+    while len(s) < pre_b10: s += bytes([255, 0])
+    s += bytes([preval, 0]); s += fgr
+    Ltot = pre_b10 + 4 + (len(bf) - _fg0(bf))
+    while len(s) < Ltot: s += bytes([255, 0])
+    return bytes(s[:Ltot])
+
+
+# 2-AXIS CORNER chunk dispatch (all 4 types of a plate crossing both x=32 and y=32):
+#   (low-x, low-y)  : gen_heightmap_unified((n_left+1) x (n_low+1) plate @ start)  [fwd ghosts both axes]
+#   (high-x, low-y) : gen_seam_high(R_x, ly0=start_y, ny=n_low+1)                  [x col-splice]
+#   (low-x, high-y) : gen_seam_high_y(R_y, n_left+1, lx0=start_x)                  [y row-splice]
+#   (high-x, high-y): gen_corner_hh(R_x, R_y)                                       [both splices]
+# All byte-exact vs CR1 2737. Base-position jitter SOLVED (bfs = CV>160 / CV<160 mirror; declpair0 C=322).
+
+
+# ── MULTI-CHUNK TERRAIN GENERATOR (orchestration) ───────────────────────────
+# Splits a flat footprint across chunk boundaries and dispatches each chunk to the
+# right byte-exact generator. Validated scope: spans at most one boundary per axis
+# (single chunk / single seam / 2-axis corner). gx,gy = global voxel coords of the
+# footprint's low corner; chunk = 8 + g//32, local = g%32 (Static-M).
+def gen_terrain_flat(gx, gy, nx, ny, lz0=10, h=1):
+    """Return {(cx,cy,cz): scan} for a flat nx*ny footprint at global (gx,gy), z=lz0.
+    Byte-exact vs single-chunk plates, x/y seams (2669/2673/2729), and 2-axis
+    corners (CR1/CC-A/CC-B). Requires the footprint to cross <=1 x-boundary and
+    <=1 y-boundary (the validated multi-chunk scope)."""
+    cz = 8 + lz0 // 32
+    bx = 32 * ((gx // 32) + 1)                            # next x chunk-boundary
+    by = 32 * ((gy // 32) + 1)
+    xcross = gx < bx <= gx + nx - 1
+    ycross = gy < by <= gy + ny - 1
+    lx, ly = gx % 32, gy % 32                            # local low corner
+    cxl, cyl = 8 + gx // 32, 8 + gy // 32                # low chunk indices
+    out = {}
+    # MULTI-x-boundary span (any number of x-chunks), single y-chunk, any ny:
+    #   low chunk (fwd ghost) -> middle chunk(s) (both-sides ghost) -> high seam.
+    # Byte-exact vs MID-1 2762 (ny=1) and MID2 2779 (ny=2). Flat only (no displacement).
+    if not ycross and (gx + nx) > bx + 32:
+        cxh = 8 + (gx + nx - 1) // 32                     # high chunk index
+        nL = bx - gx                                      # voxels in low chunk
+        Rx = (gx + nx) - 32 * ((gx + nx - 1) // 32)       # voxels in high chunk
+        out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * ny] * (nL + 1), lx0=lx, ly0=ly, lz0=lz0)
+        for cx in range(cxl + 1, cxh):                    # fully-spanned middle chunks
+            out[(cx, cyl, cz)] = gen_middle_x(32, ly0=ly, lz0=lz0, h=h, ny=ny)
+        out[(cxh, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=ny)
+        return out
+    if xcross and (gx + nx) > bx + 32:
+        raise ValueError("footprint crosses >1 x-boundary with y-cross/ny>1 (unvalidated)")
+    if ycross and (gy + ny) > by + 32:
+        raise ValueError("footprint crosses >1 y-boundary (unvalidated)")
+    if not xcross and not ycross:                        # single interior chunk
+        out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * ny] * nx, lx0=lx, ly0=ly, lz0=lz0)
+        return out
+    nL = bx - gx if xcross else nx                       # x: voxels in low chunk
+    Rx = (gx + nx) - bx if xcross else 0                 # x: voxels in high chunk
+    nLy = by - gy if ycross else ny
+    Ry = (gy + ny) - by if ycross else 0
+    if xcross and not ycross:                            # x-seam only
+        out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * ny] * (nL + 1), lx0=lx, ly0=ly, lz0=lz0)
+        out[(cxl + 1, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=ny)
+    elif ycross and not xcross:                          # y-seam only
+        out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * (nLy + 1)] * nx, lx0=lx, ly0=ly, lz0=lz0)
+        out[(cxl, cyl + 1, cz)] = gen_seam_high_y(Ry, nx, lx0=lx, lz0=lz0, h=h)
+    else:                                                # 2-axis corner (4 chunks)
+        out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * (nLy + 1)] * (nL + 1), lx0=lx, ly0=ly, lz0=lz0)
+        out[(cxl + 1, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=nLy + 1)
+        out[(cxl, cyl + 1, cz)] = gen_seam_high_y(Ry, nL + 1, lx0=lx, lz0=lz0, h=h)
+        out[(cxl + 1, cyl + 1, cz)] = gen_corner_hh(Rx, Ry, lz0=lz0, h=h)
+    return out
+
+
+def gen_terrain_flat_ymulti(gx, gy, nx, ny, lz0=10, h=1):
+    """Flat patch crossing ANY number of Y-boundaries within a single x-chunk (nx wide).
+    Row-direction mirror of the multi-x path: low-y chunk (fwd ghost) -> y-middle(s)
+    -> high-y seam. Returns {(cx,cy,cz): scan}. Byte-exact vs MIDY-NX 2830/2844 (3
+    y-chunks). Falls back to gen_terrain_flat for <=1 y-boundary."""
+    by = 32 * ((gy // 32) + 1)
+    if (gy + ny) <= by:
+        return gen_terrain_flat(gx, gy, nx, ny, lz0=lz0, h=h)
+    n_low = by - gy; cyl = 8 + gy // 32; cyh = 8 + (gy + ny - 1) // 32
+    n_high = (gy + ny) - 32 * ((gy + ny - 1) // 32); M = cyh - cyl - 1
+    lx = gx % 32; ly = gy % 32; cx = 8 + gx // 32; cz = 8 + lz0 // 32
+    out = {(cx, cyl, cz): gen_heightmap_unified([[h] * (n_low + 1)] * nx, lx0=lx, ly0=ly, lz0=lz0)}
+    for j in range(M):
+        out[(cx, cyl + 1 + j, cz)] = gen_middle_y(nx=nx, lx0=lx, lz0=lz0, h=h)
+    out[(cx, cyh, cz)] = gen_seam_high_y(n_high, nx, lx0=lx, lz0=lz0, h=h)
+    return out
+
+
+def gen_terrain_flat_2d(gx, gy, nx, ny, lz0=10, h=1):
+    """Flat patch crossing ANY number of x-boundaries AND (exactly) one y-boundary.
+    Full 2D chunk grid: y-low row (fwd-ghost) x [low | middle(s) | high] and y-high row
+    (seam) x [x-fwd-ghost seam | corner-middle(s) | 2-axis corner]. Returns {(cx,cy,cz):
+    scan}. Byte-exact vs MID2AX 2808 (3 x-chunks x 2 y-chunks). Falls back to
+    gen_terrain_flat when <=1 x-boundary or no y-boundary; requires exactly 1 y-boundary
+    with >=1 x-boundary otherwise."""
+    cz = 8 + lz0 // 32
+    bx = 32 * ((gx // 32) + 1); by = 32 * ((gy // 32) + 1)
+    xmulti = (gx + nx) > bx                                # crosses >=1 x-boundary
+    ycross = gy < by <= gy + ny - 1
+    if not (xmulti and ycross) or (gy + ny) > by + 32:
+        return gen_terrain_flat(gx, gy, nx, ny, lz0=lz0, h=h)   # simpler cases / unsupported multi-y
+    lx, ly = gx % 32, gy % 32
+    cxl, cyl = 8 + gx // 32, 8 + gy // 32
+    cxh = 8 + (gx + nx - 1) // 32
+    nL = bx - gx                                          # x cells in low chunk
+    Rx = (gx + nx) - 32 * ((gx + nx - 1) // 32)           # x cells in high chunk
+    nLy = by - gy                                         # y cells in low y-chunk (below boundary)
+    Ry = (gy + ny) - by                                   # y cells in high y-chunk
+    out = {}
+    # y-LOW row (each chunk has a y-forward-ghost -> ny=nLy+1)
+    out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * (nLy + 1)] * (nL + 1), lx0=lx, ly0=ly, lz0=lz0)
+    for cx in range(cxl + 1, cxh):
+        out[(cx, cyl, cz)] = gen_middle_x(32, ly0=ly, lz0=lz0, h=h, ny=nLy + 1)
+    out[(cxh, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=nLy + 1)
+    # y-HIGH row (y-seam back-ghost, Ry real rows)
+    out[(cxl, cyl + 1, cz)] = gen_seam_high_y(Ry, nL + 1, lx0=lx, lz0=lz0, h=h, x_fwd_ghost=True)
+    for cx in range(cxl + 1, cxh):
+        out[(cx, cyl + 1, cz)] = gen_corner_middle(Ry, lz0=lz0, h=h)
+    out[(cxh, cyl + 1, cz)] = gen_corner_hh(Rx, Ry, lz0=lz0, h=h)
+    return out
+
+
+def gen_terrain_flat_grid(gx, gy, nx, ny, lz0=10, h=1):
+    """Flat patch crossing ANY number of x-boundaries AND ANY number of y-boundaries --
+    the fully general 2D chunk grid. Composes the 3x3 chunk-type template scaled to the
+    footprint: y-low row [corner-low | x-middle(s) | x-high] (fwd-ghost, ny=nLy+1);
+    y-mid row(s) [x-low y-mid | double-middle(s) | x-high y-mid]; y-high row [x-fwd-ghost
+    y-seam | corner-middle(s) | 2-axis corner]. Returns {(cx,cy,cz): scan}. Byte-exact vs
+    MID2D33 2848 (3x3). Falls back to gen_terrain_flat_2d / gen_terrain_flat_ymulti /
+    gen_terrain_flat for degenerate (<=1 boundary on an axis) cases."""
+    bx = 32 * ((gx // 32) + 1); by = 32 * ((gy // 32) + 1)
+    xmulti = (gx + nx) > bx; ymulti = (gy + ny) > by
+    if not (xmulti and ymulti):
+        return gen_terrain_flat_2d(gx, gy, nx, ny, lz0=lz0, h=h)
+    if (gx + nx) <= bx + 32:                               # <=1 x-boundary but multi-y
+        return gen_terrain_flat_ymulti(gx, gy, nx, ny, lz0=lz0, h=h) if (gx + nx) <= bx \
+               else _grid_body(gx, gy, nx, ny, lz0, h)     # (single x-chunk handled below)
+    return _grid_body(gx, gy, nx, ny, lz0, h)
+
+
+def _grid_body(gx, gy, nx, ny, lz0, h):
+    bx = 32 * ((gx // 32) + 1); by = 32 * ((gy // 32) + 1)
+    cxl, cyl = 8 + gx // 32, 8 + gy // 32
+    cxh = 8 + (gx + nx - 1) // 32; cyh = 8 + (gy + ny - 1) // 32
+    lx, ly = gx % 32, gy % 32; cz = 8 + lz0 // 32
+    nL = bx - gx; Rx = (gx + nx) - 32 * ((gx + nx - 1) // 32)
+    nLy = by - gy; Ry = (gy + ny) - 32 * ((gy + ny - 1) // 32)
+    Mx = cxh - cxl - 1; My = cyh - cyl - 1
+    out = {}
+    # y-low row (y-forward-ghost, ny=nLy+1)
+    out[(cxl, cyl, cz)] = gen_heightmap_unified([[h] * (nLy + 1)] * (nL + 1), lx0=lx, ly0=ly, lz0=lz0)
+    for j in range(Mx): out[(cxl + 1 + j, cyl, cz)] = gen_middle_x(32, ly0=ly, lz0=lz0, h=h, ny=nLy + 1)
+    out[(cxh, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=nLy + 1)
+    # y-middle row(s)
+    for iy in range(My):
+        cy = cyl + 1 + iy
+        out[(cxl, cy, cz)] = gen_ymid_xlow(nL, lx0=lx, lz0=lz0, h=h)
+        for j in range(Mx): out[(cxl + 1 + j, cy, cz)] = gen_double_middle(lz0=lz0, h=h)
+        out[(cxh, cy, cz)] = gen_ymid_xhigh(Rx, lz0=lz0, h=h)
+    # y-high row (y-seam)
+    out[(cxl, cyh, cz)] = gen_seam_high_y(Ry, nL + 1, lx0=lx, lz0=lz0, h=h, x_fwd_ghost=True)
+    for j in range(Mx): out[(cxl + 1 + j, cyh, cz)] = gen_corner_middle(Ry, lz0=lz0, h=h)
+    out[(cxh, cyh, cz)] = gen_corner_hh(Rx, Ry, lz0=lz0, h=h)
+    return out
+
+
+def _mc_from_scan(s):
+    """mc = 512 + pre byte (the lone non-bg byte between last decl and first FG group)."""
+    decls = []; i = 0; fg0 = None
+    while i < len(s):
+        if i + 5 <= len(s) and s[i+1] == 1 and s[i+2] == 2 and s[i+4] == 0 and s[i] not in (0, 255):
+            decls.append(i); i += 5
+        elif i + 8 <= len(s) and s[i+1] == 1 and s[i] not in (0, 255) and not (s[i+2] == 2 and s[i+4] == 0):
+            fg0 = i; break
+        else: i += 1
+    return 512 + [s[j] for j in range(decls[-1] + 5, fg0) if s[j] not in (0, 255)][0]
+
+
+def gen_terrain_blueprint(chunks, template_path, out_path):
+    """Assemble {(cx,cy,cz): scan} into an importable blueprint by cloning the template
+    envelope and substituting each h3 chunk (mc=512+pre, hash recomputed). The template
+    must contain the same h3 chunk coords. Returns #chunks written. Byte-validated:
+    regen of CR1 (2737) is decompressed-identical + self-consistent."""
+    import du_assemble
+    def scan_for(cx, cy, cz):
+        s = chunks.get((cx, cy, cz))
+        return (s, _mc_from_scan(s)) if s else None
+    return du_assemble.rebuild_h3(template_path, out_path, scan_for)
+
+
+def _vts2d(rows):
+    """Per-FG-group (V0,V1) verts from a 2D z-offset slice [x-grid-line][y-grid-line],
+    emit order x-outer/y-inner (matches all surface generators)."""
+    v = []
+    for row in rows:
+        for dz in row:
+            v.append((ORIGIN, ORIGIN) if dz == 0 else (ORIGIN, (0, 0, dz)))
+    return v
+
+
+def gen_terrain(corner_z, gx, gy, lz0=10, h=1):
+    """SMOOTH multi-chunk terrain. corner_z = (nx+1)x(ny+1) grid of top-vertex z-offsets;
+    gx,gy = global voxel coords of the footprint's low corner. Splits across chunk
+    boundaries (<=1 per axis) and dispatches each chunk to its displacement-capable
+    generator with the shared ghost-line offsets. Returns {(cx,cy,cz): scan}.
+    corner_z all-zero reduces to gen_terrain_flat (byte-exact)."""
+    nx = len(corner_z) - 1; ny = len(corner_z[0]) - 1
+    cz = 8 + lz0 // 32
+    bx = 32 * ((gx // 32) + 1); by = 32 * ((gy // 32) + 1)
+    xcross = gx < bx <= gx + nx - 1
+    ycross = gy < by <= gy + ny - 1
+    lx, ly = gx % 32, gy % 32
+    cxl, cyl = 8 + gx // 32, 8 + gy // 32
+    if (xcross and gx + nx > bx + 32) or (ycross and gy + ny > by + 32):
+        raise ValueError("footprint crosses >1 boundary on an axis (unvalidated)")
+    def sl(a, b, c, d):                                   # corner_z[a:b][c:d] (x-lines a..b, y-lines c..d)
+        return [corner_z[i][c:d] for i in range(a, b)]
+    nL = bx - gx if xcross else nx
+    Rx = (gx + nx) - bx if xcross else 0
+    nLy = by - gy if ycross else ny
+    Ry = (gy + ny) - by if ycross else 0
+    out = {}
+    if not xcross and not ycross:
+        out[(cxl, cyl, cz)] = gen_surface_displaced([[h] * ny] * nx, _vts2d(sl(0, nx + 1, 0, ny + 1)),
+                                                     lx0=lx, ly0=ly, lz0=lz0)
+    elif xcross and not ycross:
+        out[(cxl, cyl, cz)] = gen_surface_displaced([[h] * ny] * (nL + 1), _vts2d(sl(0, nL + 2, 0, ny + 1)),
+                                                     lx0=lx, ly0=ly, lz0=lz0)
+        out[(cxl + 1, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=ny, verts=_vts2d(sl(nL - 1, nx + 1, 0, ny + 1)))
+    elif ycross and not xcross:
+        out[(cxl, cyl, cz)] = gen_surface_displaced([[h] * (nLy + 1)] * nx, _vts2d(sl(0, nx + 1, 0, nLy + 2)),
+                                                     lx0=lx, ly0=ly, lz0=lz0)
+        out[(cxl, cyl + 1, cz)] = gen_seam_high_y(Ry, nx, lx0=lx, lz0=lz0, h=h, verts=_vts2d(sl(0, nx + 1, nLy - 1, ny + 1)))
+    else:
+        out[(cxl, cyl, cz)] = gen_surface_displaced([[h] * (nLy + 1)] * (nL + 1), _vts2d(sl(0, nL + 2, 0, nLy + 2)),
+                                                     lx0=lx, ly0=ly, lz0=lz0)
+        out[(cxl + 1, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=nLy + 1, verts=_vts2d(sl(nL - 1, nx + 1, 0, nLy + 2)))
+        out[(cxl, cyl + 1, cz)] = gen_seam_high_y(Ry, nL + 1, lx0=lx, lz0=lz0, h=h, verts=_vts2d(sl(0, nL + 2, nLy - 1, ny + 1)))
+        out[(cxl + 1, cyl + 1, cz)] = gen_corner_hh(Rx, Ry, lz0=lz0, h=h, verts=_vts2d(sl(nL - 1, nx + 1, nLy - 1, ny + 1)))
+    return out
