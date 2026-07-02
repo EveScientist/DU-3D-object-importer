@@ -1058,6 +1058,21 @@ def _first_decl(s):
     return None
 
 
+def _seam_nx_step(g, nx):
+    """z=0 seams follow the OLD //4 floor-step boundary (one column earlier than the
+    heightmap's fixed //5). units = (nx-1)//4 - (nx-1)//5 extra pad pairs: one [255,0]
+    at the decl end + one at the tail per unit. +4 bytes at nx=5,9,10..; 0 elsewhere.
+    Confirmed nx=5 (2996/3000 both +4) vs nx=6 (2998 exact); nx<=4 unaffected."""
+    units = (nx - 1) // 4 - (nx - 1) // 5
+    if not units:
+        return g
+    g = bytearray(g)
+    de = _last_decl_end(g)
+    g[de:de] = bytes([255, 0]) * units
+    g += bytes([255, 0]) * units
+    return bytes(g)
+
+
 def _seam_z_value_nudge(g, gs, depth, sign=+1):
     """Depth-scaled base-position value correction for a z=0 seam chunk. The z=0
     seam's first-decl / preval / first-opener shift with depth (a normal heightmap's
@@ -1111,7 +1126,7 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
             else:
                 for v, r in content: fg += _zgrp(v, r)
             if c < nx: fg += clgap
-        return bytes(g[:f0]) + bytes(fg) + bytes(g[gs[-1] + 8:])
+        return _seam_nx_step(bytes(g[:f0]) + bytes(fg) + bytes(g[gs[-1] + 8:]), nx)
     # low_real >= 2: CLEAN form. FG runs = depth (mirror interior transform); decls from depth+1
     # (declares the overlap cell -> h-1 = depth); constant first-decl -1 / preval +1.
     gA = bytearray(gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1))
@@ -1128,7 +1143,7 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
     fd = _first_decl(out)
     out[fd]     = (out[fd]     - 1) % 256                  # constant, depth>=3
     out[fB-110] = (out[fB-110] + 1) % 256
-    return bytes(out)
+    return _seam_nx_step(bytes(out), nx)
 
 
 def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
@@ -1148,7 +1163,7 @@ def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
                 g[gi] = 33                                # up-facing ghost value
                 if k < ny - 1: g[gi+2] = 0; g[gi+6] = 0   # run->0 except last
     _seam_z_value_nudge(g, gs, depth)
-    return bytes(g)
+    return _seam_nx_step(bytes(g), nx)
 
 
 # ── x=0 / y=0 OCTANT SEAMS (spatial column/row axes) ────────────────────────────

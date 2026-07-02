@@ -35,8 +35,19 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 2994 | Build L — mirror asym z=0 straddle, 2×2, 1 up / 3 down, 16 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}, Z∈{−2.5,−1.5,−0.5,+0.5} | (8,8,8) HIGH d2 + (8,8,7) LOW d4 | B1: both byte-exact FIRST TRY. HIGH d2 opp4 = CLEAN form (len 757, ≠ 765 degenerate) — confirms HIGH clean-branch at depth-2. LOW d4 matched w/ NO opp param → LOW does NOT couple to high side. Asymmetry confirmed. |
 
+| 2996 | Build M — z=0 straddle, 5×2, 2 layers each side (depth-3), 40 vox | X∈{10.5,11.5,12.5,13.5,14.5}, Y∈{10.5,11.5}, Z∈{−1.5,−0.5,+0.5,+1.5} | (8,8,8)+(8,8,7) | B1: FG groups byte-identical but ref +4 bytes (len 851 vs gen 847). nx=5 seam floor-step: ref has +1 [0,255] decl-pad pair (@~200) + +1 [255,0] tail pair vs plain heightmap. NOT YET FIXED — formula needs nx=6+ to pin ((nx−1)//4 vs +1/nx≥5). nx≤4 + 3×3 all byte-exact. |
+
+| 2998 | Build N — z=0 straddle, 6×2, 2 layers each side (depth-3), 48 vox | X∈{10.5,11.5,12.5,13.5,14.5,15.5}, Y∈{10.5,11.5}, Z∈{−1.5,−0.5,+0.5,+1.5} | (8,8,8)+(8,8,7) | B1: BOTH chunks byte-exact len 881, ZERO correction. => nx=5 (2996) +4 is a LONE anomaly (nx=1-4,6 all exact) = suspected BUILD SLIP, not a real nx step. Rebuild of nx=5 requested. |
+
+| 3000 | Build M-rebuild — z=0 straddle, 5×2, depth-3, 40 vox (rebuild of 2996) | X∈{10.5,11.5,12.5,13.5,14.5}, Y∈{10.5,11.5}, Z∈{−1.5,−0.5,+0.5,+1.5} | (8,8,8)+(8,8,7) | REBUILD = same +4 as 2996 → NOT a slip, nx=5 is REAL. Comparing increments: real seam applies the +4 floor-step at nx=5 (heightmap does it at nx=6) → seam follows //4 boundary, heightmap //5. Fixed via _seam_nx_step: units=(nx−1)//4−(nx−1)//5, +1 [255,0] at decl end + tail per unit. Now byte-exact. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
+
+## z=0 seam status: FULLY GENERALIZED (byte-exact all known builds)
+depth 2/3/4 sym + asym (HIGH couples to opp real-layer count); footprints nx=2–6 / ny=2–3;
+nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 step recurrence
+(well-motivated), varying per-column depth (relief across z=0 — the next frontier).
 
 ## Archive / earlier exports (coords to backfill as confirmed)
 Older referenced exports whose exact XYZ should be added here when re-confirmed:
