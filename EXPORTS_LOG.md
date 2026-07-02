@@ -47,6 +47,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3006 | Build Q — varying-depth z=0 straddle, 2×2, +Z step of 2, LOW 2 deep, 16 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5 all4; Z=−0.5 all4; Z=+0.5 all4; Z=+1.5 X=10.5; Z=+2.5 X=10.5 | VARYING-DEPTH diff=2 CONFIRMED: interior marker = (31,2) = (33−2,2) exactly as predicted. HIGH byte-exact via gen_seam_z_high_varying([[4,4],[2,2]]). Marker (33−diff,diff) now pinned at diff 0/1/2. LOW byte-exact uniform-d3. |
 
+| 3008 | Build R — varying-depth z=0 straddle, step-UP (right-taller), 2×2, LOW 2 deep, 14 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5 all4; Z=−0.5 all4; Z=+0.5 all4; Z=+1.5 only X=11.5 | VARYING-DEPTH step-UP: marker (32,1) = SAME as step-down → direction-INDEPENDENT (|diff|). gen_seam_z_high_varying([[2,2],[3,3]]) byte-exact FIRST TRY (fn already used abs). Direction shows only in heightmap cluster opener (127 vs 126), handled by gen_heightmap_unified. LOW byte-exact uniform-d3. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
