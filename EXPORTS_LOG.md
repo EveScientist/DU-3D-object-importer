@@ -49,8 +49,15 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3008 | Build R — varying-depth z=0 straddle, step-UP (right-taller), 2×2, LOW 2 deep, 14 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5 all4; Z=−0.5 all4; Z=+0.5 all4; Z=+1.5 only X=11.5 | VARYING-DEPTH step-UP: marker (32,1) = SAME as step-down → direction-INDEPENDENT (|diff|). gen_seam_z_high_varying([[2,2],[3,3]]) byte-exact FIRST TRY (fn already used abs). Direction shows only in heightmap cluster opener (127 vs 126), handled by gen_heightmap_unified. LOW byte-exact uniform-d3. |
 
+| 3010 | Build S — nx>2 varying-depth z=0 straddle, 3-col descending +Z (4/3/2), LOW 2 deep, 24 vox | X∈{10.5,11.5,12.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all6; Z=+1.5 X∈{10.5,11.5}; Z=+2.5 X=10.5 | nx>2 varying PARTIAL: markers BOTH (32,1) correct, LOW byte-exact, but HIGH off by 45 bytes. CAUSE: descending INTERIOR column → raw heightmap emits A1 descent filler (29,0),(0,diff); seam collapses it to the single marker but gen_seam_z_high_varying leaves the (0,diff) group (val=0, invisible to _flat_groups). nx=2 never hit this (short col is always last/capped). => nx>2 varying needs the seam to compose with A1 descent/peak/valley relief encoding. NOT a quick patch. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
+
+## Frontier (next session)
+- **nx>2 varying-depth z=0 seam** = compose seam interior marker with A1's relief-filler
+  encoding (descent (val,0)+(0,diff), and peak/valley variants). 3010 has the descent data.
+  Likely also needs ascending-interior + peak + valley reference builds to pin all filler forms.
 
 ## z=0 seam status: FULLY GENERALIZED (byte-exact all known builds)
 depth 2/3/4 sym + asym (HIGH couples to opp real-layer count); footprints nx=2–6 / ny=2–3;
