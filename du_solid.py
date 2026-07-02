@@ -308,7 +308,7 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         while len(s) < t: s += bytes([255, 0])
         return s[:t]
     # floor-step & gap-shrinks (validated nx<=12, ny<=10):
-    step = (2 * ((nx + 1) // 5) if ny == 1 else 2 * ((nx - 1) // 4)) - 2 * (ny >= 4) + 2 * (4 <= ny <= 6 and (nx >= 3 or (nx == 2 and ly0 >= 0))) + dstep  # nx floor-step; ny>=4 corr -2 base, +2 back for ny=4..6 & (nx>=3 or nx==2 w/ ly0>=0); nx==2 neg-ly0 (y-seam) keeps -2; dstep=+2 down-ghost
+    step = (2 * ((nx + 1) // 5) if ny == 1 else 2 * ((nx - 1) // 5)) - 2 * (ny >= 4) + 2 * (4 <= ny <= 6 and (nx >= 3 or (nx == 2 and ly0 >= 0))) + dstep  # nx floor-step (ny>=2: //5, pinned by flat nx5 2969=step0 + nx7 wave 2965=step2); ny>=4 corr -2 base, +2 back for ny=4..6 & (nx>=3 or nx==2 w/ ly0>=0); nx==2 neg-ly0 (y-seam) keeps -2; dstep=+2 down-ghost
     xgap = bytes([255, 0]) * (4 - (ny >= 7))             # decl x-gap: 8B(ny<=6)/6B(ny>=7)
     clgap = bytes([255, 0]) * (4 - (ny >= 6))            # FG cluster gap: 8B(ny<=5)/6B(ny>=6)
     s = bytearray(bytes([0, 255]) * declpair0)
