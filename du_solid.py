@@ -1166,6 +1166,33 @@ def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
     return _seam_nx_step(bytes(g), nx)
 
 
+def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
+    """CLEAN-form +Z chunk of a z=0 seam with PER-COLUMN depth (relief crossing z=0).
+    Hdepth[xi][yi] = that column's depth (= #real +Z layers + 1 boundary ghost). The
+    HIGH chunk is just gen_heightmap_unified(Hdepth) (varying runs/values per column) +
+    the seam interior height-TRANSITION marker: interior cluster c's first content ->
+    (33-diff, diff), diff = |Hdepth[c-1][0] - Hdepth[c][0]|. Decls from Hdepth+1 per
+    column; constant first-decl -1 / preval +1; nx floor-step. Reduces to the uniform
+    clean form at diff=0. Byte-exact vs 3004 (diff1) / 3006 (diff2) + uniform 2983.
+    REQUIRES low_real >= 2 (clean form). DEFERRED: step-up sign asymmetry, ny>2 (only
+    the first ghost row is marked here), nx>2 multi-interior, degenerate (low_real==1)."""
+    nx = len(Hdepth); ny = len(Hdepth[0]); per = 1 + ny
+    gA = bytearray(gen_heightmap_unified(Hdepth, lx0=lx0, ly0=ly0, lz0=-1))
+    gs = _flat_groups(gA)
+    for c in range(1, nx):                                # interior clusters -> transition marker
+        gi = gs[c * per + 1]
+        diff = abs(Hdepth[c-1][0] - Hdepth[c][0])
+        gA[gi] = (33 - diff) % 256; gA[gi+2] = diff; gA[gi+6] = diff
+    Hd1 = [[h + 1 for h in row] for row in Hdepth]        # decls declare the overlap cell
+    gB = gen_heightmap_unified(Hd1, lx0=lx0, ly0=ly0, lz0=-1)
+    fA = _fg0(gA); fB = _fg0(gB)
+    out = bytearray(gB[:fB] + gA[fA:])
+    fd = _first_decl(out)
+    out[fd]     = (out[fd]     - 1) % 256
+    out[fB-110] = (out[fB-110] + 1) % 256
+    return _seam_nx_step(bytes(out), nx)
+
+
 # ── x=0 / y=0 OCTANT SEAMS (spatial column/row axes) ────────────────────────────
 # Unlike z=0 (depth axis -> special clusters), a shape straddling x=0 or y=0 makes
 # two chunks that are just PLAIN plates evaluated at the ghost position (one step

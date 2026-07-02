@@ -41,6 +41,12 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3000 | Build M-rebuild — z=0 straddle, 5×2, depth-3, 40 vox (rebuild of 2996) | X∈{10.5,11.5,12.5,13.5,14.5}, Y∈{10.5,11.5}, Z∈{−1.5,−0.5,+0.5,+1.5} | (8,8,8)+(8,8,7) | REBUILD = same +4 as 2996 → NOT a slip, nx=5 is REAL. Comparing increments: real seam applies the +4 floor-step at nx=5 (heightmap does it at nx=6) → seam follows //4 boundary, heightmap //5. Fixed via _seam_nx_step: units=(nx−1)//4−(nx−1)//5, +1 [255,0] at decl end + tail per unit. Now byte-exact. |
 
+| 3002 | Build O — varying-depth z=0 straddle, 2×2, stepped +Z (X=10.5 up 2, X=11.5 up 1), all down 1, 10 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−0.5 all4; Z=+0.5 all4; Z=+1.5 only X=10.5 | (8,8,8)+(8,8,7) | VARYING-DEPTH start. HIGH = per-column heightmap [[3,3],[2,2]] (runs encode per-col depth) + seam interior transform. LOW byte-exact uniform-d2 (unaffected by +Z variation). Interior filler = (0,1) here (varying) vs (inner,0) uniform — height-TRANSITION marker differs. Tangled w/ degenerate (low_real=1). |
+
+| 3004 | Build P — CLEAN varying-depth z=0 straddle, 2×2, stepped +Z, LOW 2 deep, 14 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5 all4; Z=−0.5 all4; Z=+0.5 all4; Z=+1.5 only X=10.5 | VARYING-DEPTH clean form. HIGH REPRODUCED byte-exact (inline model): heightmap([[3,3],[2,2]]) + interior marker (33−diff, diff) [diff=1 here → (32,1)] + decls@H+1 + ±1 nudge. LOW byte-exact uniform-d3. Marker confirmed diff=1 ONLY — needs diff=2 + step-up to pin. Not yet coded into a gen_seam function. |
+
+| 3006 | Build Q — varying-depth z=0 straddle, 2×2, +Z step of 2, LOW 2 deep, 16 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5 all4; Z=−0.5 all4; Z=+0.5 all4; Z=+1.5 X=10.5; Z=+2.5 X=10.5 | VARYING-DEPTH diff=2 CONFIRMED: interior marker = (31,2) = (33−2,2) exactly as predicted. HIGH byte-exact via gen_seam_z_high_varying([[4,4],[2,2]]). Marker (33−diff,diff) now pinned at diff 0/1/2. LOW byte-exact uniform-d3. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
