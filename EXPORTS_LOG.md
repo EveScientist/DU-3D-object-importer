@@ -52,7 +52,10 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 | 3010 | Build S — nx>2 varying-depth z=0 straddle, 3-col descending +Z (4/3/2), LOW 2 deep, 24 vox | X∈{10.5,11.5,12.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all6; Z=+1.5 X∈{10.5,11.5}; Z=+2.5 X=10.5 | nx>2 varying SOLVED. Rebuilt gen_seam_z_high_varying to REBUILD each interior cluster (opener + (ny−1) markers + real last row), DISCARDING A1's relief filler ((val,0)+(0,diff)); pad total = len(gA)−f0−removed. Byte-exact + reduces to all prior (3004/3006/3008/2983/2990). |
 
 ## Pending (spec'd, awaiting export number)
-- (none)
+- **Build T** — varying-depth z=0 straddle, 3-col PEAK (2/4/2), LOW 2 deep, 22 vox:
+  X∈{10.5,11.5,12.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all6; Z=+1.5 X=11.5; Z=+2.5 X=11.5.
+  HIGH depths X=10.5→2, X=11.5→4, X=12.5→2. Purpose: validate ascending+descending+apex.
+  Prediction: gen_seam_z_high_varying([[2,2],[4,4],[2,2]]), both markers (31,2).
 
 ## Frontier (next session)
 - **nx>2 varying peak/valley/ascending** — the cluster-rebuild discards whatever relief
