@@ -29,6 +29,12 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 | 2986 | Build H — z=0 straddle, 2×2, 1 layer each side (depth-2), 8 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}, Z∈{−0.5,+0.5} | (8,8,8)+(8,8,7) | B1: true depth-2 encoding. HIGH len 765 (degenerate: extra (0,0) filler, ghost val 31, h-1=1). Both chunks byte-exact. |
 | 2988 | Build I — z=0 straddle, 2×2, 3 layers each side (depth-4), 24 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}, Z∈{−2.5,−1.5,−0.5,+0.5,+1.5,+2.5} | (8,8,8)+(8,8,7) | B1: 3rd point. Confirmed HIGH nudge is CONSTANT ±1 (not ×dep); LOW nudge is ×dep. Both chunks byte-exact. z=0 seam depth-generalized (2×2, depth 2/3/4). |
 
+| 2990 | Build J — z=0 straddle, 3×3, 2 layers each side (depth-3), 36 vox | X∈{10.5,11.5,12.5}, Y∈{10.5,11.5,12.5}, Z∈{−1.5,−0.5,+0.5,+1.5} | (8,8,8)+(8,8,7) | B1: both chunks byte-exact len 834 FIRST TRY. ny=3 interior-row + nx=3 at depth>2 generalize. |
+
+| 2992 | Build K — asym z=0 straddle, 2×2, 3 up / 1 down, 16 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}, Z∈{−0.5,+0.5,+1.5,+2.5} | (8,8,8) HIGH d4 + (8,8,7) LOW d2 | B1 COUPLING found: HIGH form depends on LOW's real-layer count. HIGH len 765 DEGENERATE (low_real==1) despite own depth-4; filler val=inner=depth−2=2, h-1=3. Fixed via opp_depth param. Both byte-exact. LOW unchanged. |
+
+| 2994 | Build L — mirror asym z=0 straddle, 2×2, 1 up / 3 down, 16 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}, Z∈{−2.5,−1.5,−0.5,+0.5} | (8,8,8) HIGH d2 + (8,8,7) LOW d4 | B1: both byte-exact FIRST TRY. HIGH d2 opp4 = CLEAN form (len 757, ≠ 765 degenerate) — confirms HIGH clean-branch at depth-2. LOW d4 matched w/ NO opp param → LOW does NOT couple to high side. Asymmetry confirmed. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

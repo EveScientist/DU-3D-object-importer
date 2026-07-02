@@ -1082,15 +1082,20 @@ def _seam_z_value_nudge(g, gs, depth, sign=+1):
 # (extra (0,0) filler, ghost val 31, h-1=depth-1); depth>=3 uses decls@H=depth+1 +
 # FG@H=depth + constant first-decl-1/preval+1. (Archive 2906/2935/2937/2910 are at an
 # UNKNOWN base position -> not byte oracles; see EXPORTS_LOG.md.)
-def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2):
-    """+Z chunk of a z=0 seam. depth = (#real +Z layers) + 1 ghost. The FG region is a
-    heightmap at H=depth (face runs = depth) with interior x-columns transformed IN
-    PLACE (mirror of gen_seam_z_low): ghost rows (all but the LAST per column) -> (33,
-    run0), last row stays real. The DECL region is taken from H=depth+1 (the +Z chunk
-    declares one extra overlap cell -> h-1 field = depth), then two depth-scaled
-    nudges: first-decl -= dep, preval += dep (dep = depth-2). Byte-exact vs 2983 (d3).
-    NOTE: depth-2/4 pending fresh known-position game exports to pin the scaling."""
-    if depth <= 2:                                        # degenerate depth-2 form
+def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
+    """+Z chunk of a z=0 seam. depth = (#real +Z layers) + 1 ghost. opp_depth = the
+    LOW side's depth (= #real -Z layers + 1); defaults to depth (symmetric straddle).
+    The HIGH form is COUPLED to the LOW side's real-layer count (low_real = opp_depth-1):
+      - low_real == 1 (opp_depth<=2): DEGENERATE form. FG@H=depth (runs=depth), decls
+        h-1=depth-1, interior x-cols = (val,0)+(inner,0)+(real) with inner=depth-2.
+      - low_real >= 2: CLEAN form. FG@H=depth with mirror interior transform (ghost rows
+        -> (33,run0), last stays real); decls from H=depth+1 (declares the overlap cell
+        -> h-1=depth); constant first-decl -1 / preval +1.
+    Byte-exact vs 2986(d2)/2983(d3)/2988(d4) symmetric + 2990(3x3) + 2992(3up/1down asym)."""
+    if opp_depth is None:
+        opp_depth = depth
+    if opp_depth <= 2:                                    # LOW side <=1 real layer -> degenerate
+        inner = depth - 2
         g = gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1)
         gs = _flat_groups(g); f0 = _fg0(g)
         gvals = [(g[i], g[i+2]) for i in gs]; per = 1 + ny
@@ -1099,15 +1104,15 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2):
         for c in range(nx + 1):
             ov, orr = gvals[idx]; idx += 1; fg += _zgrp(ov, orr)
             content = gvals[idx:idx + ny]; idx += ny
-            if 1 <= c <= nx - 1:                          # interior: (val,0)+(0,0) filler
+            if 1 <= c <= nx - 1:                          # interior: (val,0)+(inner,0) filler
                 for k in range(ny - 1):
-                    fg += _zgrp(content[k][0], 0) + _zgrp(0, 0)
+                    fg += _zgrp(content[k][0], 0) + _zgrp(inner, 0)
                 fg += _zgrp(*content[ny - 1])
             else:
                 for v, r in content: fg += _zgrp(v, r)
             if c < nx: fg += clgap
         return bytes(g[:f0]) + bytes(fg) + bytes(g[gs[-1] + 8:])
-    # depth >= 3: FG runs = depth (mirror interior transform); decls from depth+1
+    # low_real >= 2: CLEAN form. FG runs = depth (mirror interior transform); decls from depth+1
     # (declares the overlap cell -> h-1 = depth); constant first-decl -1 / preval +1.
     gA = bytearray(gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1))
     gs = _flat_groups(gA); per = 1 + ny
