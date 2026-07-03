@@ -1158,7 +1158,8 @@ def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
         for k in range(ny):
             gi = gs[b + 1 + k]
             if k == 0:
-                g[gi+2] = 0; g[gi+6] = 0                  # first: run->0, value kept
+                if ny > 1:                                # first: run->0, value kept
+                    g[gi+2] = 0; g[gi+6] = 0              # (ny=1: last-row rule wins, run kept; 3034)
             else:
                 g[gi] = 33                                # up-facing ghost value
                 if k < ny - 1: g[gi+2] = 0; g[gi+6] = 0   # run->0 except last

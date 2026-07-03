@@ -69,8 +69,14 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3028 | Build AB — z=0 straddle, 2×2, BOTH sides varying: X=10.5 up 2/down 4, X=11.5 up 1/down 2, 18 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5 X=10.5 pair; Z=+0.5/−0.5/−1.5 all4; Z=−2.5/−3.5 X=10.5 pair | INDEPENDENCE PROVEN, zero new code: HIGH == gen_seam_z_high_varying([[3,3],[2,2]]) byte-exact (identical to 3004/P despite varying ground below); LOW == gen_seam_z_low_varying([[5,5],[3,3]]) byte-exact (identical to 3024/Z despite varying surface above). VARYING z=0 SEAM GENERATIVELY COMPLETE for validated envelope. |
 
+| 3032 | Build AC — x=0 straddle plate, 4 cols × 2 rows × 1 tall, 8 vox | X∈{−1.5,−0.5,+0.5,+1.5}, Y∈{10.5,11.5}, Z=10.5 | (8,8,8)+(7,8,8) | B2: LOW SOLVED = plain 3-wide plate @lx0=30 (=32−n_real), 1 boundary ghost, NO jitter (old _x0_jitter = CV-band shim, obsolete). HIGH = plain 3w @lx0=−1 + leading ghost-decl block [0,255,0, CV(lx0=−2)=175,1,2,0,0, 33,1,2,0] + first-decl +44 (120→164). ALSO: 2941/2943 minimal builds DISQUALIFIED as oracles (unknown position + structure mismatch under current code). |
+
+| 3034 | (AD mis-build — axes swapped) 2×1 bar, 3 up / 3 down crossing z=0, 12 vox | actual: 2 cols × 1 row × 6 tall through z=0 (intended AD plate rotated) | (8,8,8)+(8,8,7) | ACCIDENTAL FIRST ny=1 z-seam datapoint: HIGH matched unchanged; LOW off 2 bytes → at ny=1 the single row is first AND last, last-row rule wins (run kept, not zeroed). Fixed in gen_seam_z_low (ny>1 guard); all regressions + varying reductions clean. |
+
 ## Pending (spec'd, awaiting export number)
-- (none)
+- **Build AD (re-request)** — x=0 straddle plate, 6 cols × 2 rows × 1 tall, 12 vox:
+  X∈{−2.5,−1.5,−0.5,+0.5,+1.5,+2.5}, Y∈{10.5,11.5}, Z=10.5. Chunks (8,8,8)+(7,8,8).
+  Purpose: B2 — width scaling: LOW predicted plain 4w@lx0=29; HIGH ghost-block value CV(−2) fixed or CV(−n)? first-decl delta +44 constant?
 
 ## Generated import tests
 - **tests/z0_novel_pairing_gen.blueprint** (2026-07-03) — novel pairing: HIGH = 3014's y-varying
