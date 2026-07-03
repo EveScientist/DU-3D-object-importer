@@ -92,7 +92,9 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 | 3052 | Build AL — x=0 one-sided step AT boundary (heights 2,2|1,1), 2 rows, 12 vox | Z=10.5: all 4 cols × 2 rows; Z=11.5: X∈{−1.5,−0.5} only | (8,8,8)+(7,8,8) | STEP-AT-BOUNDARY = NO transition geometry (zero 16-byte groups) — pure flat clusters, each side own heights, ghosts copy neighbors (HIGH ghost h2, LOW ghost h1); cliff face = chunk face. 3-vertex form ONLY when step is 1 col AWAY from boundary (slope spans it). Fillers per-cluster by own height (h1 clusters none); LOW c2 (h2) unexpectedly plain — map in generator work. HIGH clusters: [h2+filler ghost],[h2 plain],[h1],[h1]; LOW: [h2 plain far],[h2+filler],[h2 plain],[h1 ghost]. |
 
 ## Pending (spec'd, awaiting export number)
-- (none)
+- **Build AM** — x=0 straddle, step TWO cols from boundary (heights 2,1,1|1,1,1), 2 rows, 14 vox:
+  Z=10.5: all 6 cols × 2 rows; Z=11.5: X=−2.5 only. Chunks (8,8,8)+(7,8,8).
+  Purpose: is the 3-vertex form boundary-adjacent-only (step here → A1-style relief encoding) or step-local anywhere in a seam chunk?
 
 ## Generated import tests
 - **tests/z0_novel_pairing_gen.blueprint** (2026-07-03) — novel pairing: HIGH = 3014's y-varying
