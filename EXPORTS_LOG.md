@@ -85,6 +85,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3046 | Build AI — y=0 straddle slab, 2 cols × 4 rows (2/side) × 3 tall, 24 vox | X∈{10.5,11.5}, Y∈{−1.5,−0.5,+0.5,+1.5}, Z∈{10.5,11.5,12.5} | (8,8,8)+(8,7,8) | y=0 h=3: BYTE-EXACT AS-IS both chunks, zero code change. Filler h−2 confirmed for y=0; decl-third flip ABSENT (decls keep 2 at h=3) → max(2,h) rule is x=0-SPECIFIC. Suite 32/32. B2 basic height model complete for all 3 axes. |
 
+| 3048 | Build AJ — x=0 straddle height hump (1,2|2,1 across X), 2 rows, 12 vox | Z=10.5: all 4 cols × 2 rows; Z=11.5: X=±0.5 only | (8,8,8)+(7,8,8) | NEW SUB-FORMAT DISCOVERED: 16-byte THREE-VERTEX groups [val,1,run, T0,0, T1,0, T2,0, 0] in boundary-adjacent clusters — T1 z-offsets +14 and +42 (=half voxel) steps — DU generates sub-voxel transition geometry where relief steps cross the seam. Confirmed: ghost cols take across-boundary neighbor height; head transforms unchanged; uniform fillers where expected. HIGH raw @360-432, LOW @720-815 documented. Offset formula (why 14/42, scaling with step size/direction) = NEW FRONTIER, needs dedicated builds. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
