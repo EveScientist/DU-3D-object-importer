@@ -1166,6 +1166,51 @@ def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
     return _seam_nx_step(bytes(g), nx)
 
 
+def gen_seam_z_low_varying(Ldepth, lx0=10, ly0=10, lz0=31):
+    """-Z chunk of a z=0 seam with PER-COLUMN depth. Ldepth[xi][yi] = that column's
+    depth (= #real -Z layers + 1 boundary ghost). Generalizes gen_seam_z_low's uniform
+    in-place transform, everything keyed by diff = |Ldepth[c-1][0] - Ldepth[c][0]|:
+    interior first group run -> diff (uniform: 0); later groups value -> 33-diff
+    (uniform: 33); final cluster opener += diff; col c x-marker decl += diff; nudges
+    split per column: first-decl & fg0 opener -= dep(col0), preval += dep(col_last)
+    (dep = depth-2). Reduces exactly to gen_seam_z_low for uniform input. Byte-exact
+    vs 3024 LOW ([[5,5],[3,3]]). NOTE representation choice (3022 vs 3024): DU folds a
+    1-layer below-min extra into the HIGH chunk (LOW stays min-uniform); only a >=2
+    layer extra produces this varying LOW. DEFERRED: ny>2 varying-y LOW, mixed extras."""
+    nx = len(Ldepth); ny = len(Ldepth[0])
+    g = bytearray(gen_heightmap_unified(Ldepth, lx0=lx0, ly0=ly0, lz0=lz0, cz_neg=True))
+    gs = _flat_groups(g); per = 1 + ny
+    for c in range(1, nx):                                # interior columns
+        diff = abs(Ldepth[c-1][0] - Ldepth[c][0])
+        b = c * per
+        for k in range(ny):
+            gi = gs[b + 1 + k]
+            if k == 0:
+                g[gi+2] = diff; g[gi+6] = diff            # run -> diff (uniform: 0)
+            else:
+                g[gi] = (33 - diff) % 256                 # value -> 33-diff (uniform: 33)
+                if k < ny - 1: g[gi+2] = 0; g[gi+6] = 0   # middle rows: run->0
+    if nx >= 2:                                           # final cluster opener += diff
+        dlast = abs(Ldepth[nx-2][0] - Ldepth[nx-1][0])
+        go = gs[nx * per]
+        g[go] = (g[go] + dlast) % 256
+    decls = []; i = 0                                     # decl positions [val,1,2,d,0]
+    while i < len(g) - 5:
+        if g[i+1] == 1 and g[i+2] == 2 and g[i+4] == 0 and g[i] not in (0, 255):
+            decls.append(i); i += 5
+        else: i += 1
+    for c in range(1, nx):                                # col c x-marker decl += diff
+        diff = abs(Ldepth[c-1][0] - Ldepth[c][0])
+        di = decls[c * ny]
+        g[di] = (g[di] + diff) % 256
+    dep0 = Ldepth[0][0] - 2; depL = Ldepth[-1][0] - 2     # per-column nudges
+    f0 = _fg0(g)
+    g[decls[0]] = (g[decls[0]] - dep0) % 256
+    g[f0]       = (g[f0]       - dep0) % 256
+    g[f0-110]   = (g[f0-110]   + depL) % 256
+    return _seam_nx_step(bytes(g), nx)
+
+
 def _split_fg_clusters(g):
     """Split the FG region of g into clusters (lists of 8-byte flat groups), separated
     by [255,0] gap runs. Trailing pad is dropped. Filler groups (val 0) are included."""

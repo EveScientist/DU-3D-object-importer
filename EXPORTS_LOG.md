@@ -63,10 +63,10 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3022 | Build Y — z=0 straddle, 2×2, varying −Z depth (up 2 all; down 3 X=10.5 / down 2 X=11.5), 18 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all4; Z=−2.5 only X=10.5 pair | STRUCTURAL SURPRISE: LOW = byte-exact UNIFORM min-depth d3 (z=−2.5 layer ABSENT from LOW); the extra below-min layer folds into HIGH = gen_seam_z_high_varying([[4,4],[3,3]]) byte-exact. Only 2 h3 chunks (verified). HIGH param = up+ghost+extra-below; additive-vs-flag ambiguous at extra=1 → Build Z. |
 
+| 3024 | Build Z — z=0 straddle, 2×2, up 2 all, down 4 X=10.5 / down 2 X=11.5 (extra=2), 20 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all4; Z=−2.5/−3.5 only X=10.5 pair | BOTH hypotheses wrong — ROLES FLIPPED vs 3022: HIGH = byte-exact plain uniform d3; LOW carries the variation (first varying LOW ever). Decoded + coded gen_seam_z_low_varying([[5,5],[3,3]]) byte-exact: interior k0 run→diff, k≥1 value→33−diff, final opener +diff, col-c x-marker decl +diff, nudges split (first-decl/fg0−dep(col0), preval+dep(colLast)). All 8 uniform reductions == gen_seam_z_low exactly. REPRESENTATION RULE: extra=1 → folds into HIGH (3022); extra≥2 → varying LOW + min-uniform HIGH (3024). |
+
 ## Pending (spec'd, awaiting export number)
-- **Build Z** — z=0 straddle, 2×2, up 2 all, down 4 X=10.5 / down 2 X=11.5 (extra=2), 20 vox:
-  X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all4; Z=−2.5/−3.5 only X=10.5 pair.
-  Purpose: disambiguate fold-in — additive predicts HIGH varying [[5,5],[3,3]]; flag predicts [[4,4],[3,3]]; LOW expected uniform min d3.
+- (none)
 
 ## Frontier (next session)
 - **nx>2 varying: peak VALIDATED (3012)** — ascending+descending+apex byte-exact.
