@@ -1185,22 +1185,25 @@ def _split_fg_clusters(g):
 def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
     """CLEAN-form +Z chunk of a z=0 seam with PER-COLUMN depth (relief crossing z=0).
     Hdepth[xi][yi] = that column's depth (= #real +Z layers + 1 boundary ghost). The
-    HIGH chunk = gen_heightmap_unified(Hdepth), with each INTERIOR cluster REBUILT as
-    opener + (ny-1) transition markers + the real last row -- discarding the heightmap's
-    relief filler (A1 descent/peak encoding). Marker k mirrors A1's rInc/rDec running-max
-    architecture over the per-row diffs (diff(r) = |Hdepth[c-1][r] - Hdepth[c][r]|):
-    value = 33 - FWD running max(diffs[0..k]), run = BWD running max(diffs[k..])
-    (pinned by 3014 (1,0)->(32,1), 3016 (0,1)->(33,1), 3018 (2,1,0)->(31,2),(31,1)).
-    Additionally the LAST content row of EVERY cluster takes value = 33 - BWD running
-    max(profile[ny-2:]) (profile = own column for edge clusters, ADJACENT-pair max
-    for interiors -- not a running max from col0, pinned by 3010) -- differs from the
-    raw heightmap only for y-descending tails (3018 (4,3,2) -> (30,2) not (29,2)). Decls from Hdepth+1
-    (declare overlap cell); constant first-decl -1 / preval +1; nx floor-step. Reduces
-    to the uniform clean form at diff=0. Byte-exact vs 3004/3006/3008/3010(nx=3 desc)/
-    3012(peak)/3014/3016(y-varying)/3018(ny=3 y-graded) + uniform 2983/2990.
-    REQUIRES low_real >= 2 (clean form). DEFERRED (need builds): ny>=4 middle-row
-    values (rDec-shift vs heightmap ambiguous at ny<=3), valley nx>2, degenerate
-    (low_real==1) varying."""
+    HIGH chunk = gen_heightmap_unified(Hdepth) with a UNIFIED value/run rule applied
+    per 8-byte group index i within a cluster, over a sequence seq:
+        value_i = 33 - (seq[0] if i == 0 else max(seq[i-1:]))  (SHIFTED bwd running max)
+        run_i   = max(seq[i:])                                 (bwd running max)
+    EDGE clusters: seq = the column profile, applied to content rows r>=1 (row 0 and
+    all runs kept from the heightmap, which already matches). INTERIOR clusters:
+    REBUILT as opener + (ny-1) markers + real last row (discarding the heightmap's
+    relief filler); markers use seq = per-row diffs (diff(r) = |Hdepth[c-1][r] -
+    Hdepth[c][r]|), last row uses the profile rule at r = ny-1. Interior profile =
+    ADJACENT-pair max(col c-1, col c), not a running max from col0 (pinned by 3010).
+    The SHIFTED-rDec value rule was pinned by 3020 (ny=4: diffs (3,2,1,0) -> markers
+    (30,3),(30,2),(31,1); profile (5,4,3,2) content (28,5),(28,4),(29,3),(30,2));
+    the earlier fwd-running-max hypothesis fit ny<=3 coincidentally. Decls from
+    Hdepth+1 (declare overlap cell); constant first-decl -1 / preval +1; nx floor-step.
+    Reduces to the uniform clean form at diff=0. Byte-exact vs 3004/3006/3008/
+    3010(nx=3 desc)/3012(peak)/3014/3016(y-varying)/3018(ny=3 y-graded)/3020(ny=4
+    y-staircase) + uniform 2983/2990. REQUIRES low_real >= 2 (clean form). DEFERRED
+    (need builds): non-monotonic y-profiles at ny>=3 (y-peak/y-valley), valley nx>2,
+    degenerate (low_real==1) varying."""
     nx = len(Hdepth); ny = len(Hdepth[0])
     gA = gen_heightmap_unified(Hdepth, lx0=lx0, ly0=ly0, lz0=-1)
     f0, clusters = _split_fg_clusters(gA)
@@ -1216,21 +1219,25 @@ def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
     clgap = bytes([255, 0]) * (4 - (ny >= 6))
     fg = bytearray(); removed = 0
     for ci, cl in enumerate(clusters):
-        last = bytearray(cl[-1])                          # last content row: rDec value
-        if ny >= 2:
-            last[0] = (33 - max(prof[ci][ny-2:])) % 256
+        P = prof[ci]
         if 1 <= ci <= nx - 1:                             # interior cluster -> rebuild
             diffs = [abs(Hdepth[ci-1][r] - Hdepth[ci][r]) for r in range(ny)]
             fg += cl[0]                                   # opener
-            rinc = 0
-            for k in range(ny - 1):
-                rinc = max(rinc, diffs[k])
-                fg += _zgrp(33 - rinc, max(diffs[k:]))    # marker: rInc value, rDec run
+            for k in range(ny - 1):                       # markers: shifted-rDec values
+                val = diffs[0] if k == 0 else max(diffs[k-1:])
+                fg += _zgrp(33 - val, max(diffs[k:]))
+            last = bytearray(cl[-1])                      # real last row
+            if ny >= 2:
+                last[0] = (33 - max(P[ny-2:])) % 256
             fg += bytes(last)
             removed += (len(cl) - (ny + 1)) * 8           # discarded relief filler
-        else:
-            for grp in cl[:-1]: fg += grp
-            fg += bytes(last)
+        else:                                             # edge cluster: shift row values
+            fg += cl[0]                                   # opener
+            for r, grp in enumerate(cl[1:]):
+                g2 = bytearray(grp)
+                if r >= 1:
+                    g2[0] = (33 - max(P[r-1:])) % 256     # value = rDec at prev row
+                fg += bytes(g2)
         if ci < len(clusters) - 1: fg += clgap
     total = len(gA) - f0 - removed
     while len(fg) < total: fg += bytes([255, 0])

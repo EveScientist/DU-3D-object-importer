@@ -59,6 +59,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3018 | Build W — z=0 straddle, 2×3, y-graded +Z (Hdepth=[[4,3,2],[2,2,2]]), LOW 2 deep, 21 vox | X∈{10.5,11.5}, Y∈{10.5,11.5,12.5}; Z=−1.5/−0.5/+0.5 all6; Z=+1.5 (10.5,10.5)+(10.5,11.5); Z=+2.5 (10.5,10.5) | ny=3 CRACKED THE FULL MARKER MODEL: ref markers (31,2),(31,1) → value = 33−FWD running max(diffs[0..k]), run = BWD running max(diffs[k..]) (mirrors A1 rInc/rDec). ALSO: last content row of every cluster = 33−BWD running max(profile[ny−2:]) (y-descending tails differ from raw heightmap: (30,2) not (29,2)); interior profile = ADJACENT-pair max, not running max from col0 (pinned by 3010 regression). All 10 refs byte-exact. LOW byte-exact uniform-d3 2×3. |
 
+| 3020 | Build X — z=0 straddle, 2×4, y-staircase +Z (Hdepth=[[5,4,3,2],[2,2,2,2]]), LOW 2 deep, 30 vox | X∈{10.5,11.5}, Y∈{10.5,11.5,12.5,13.5}; Z=−1.5/−0.5/+0.5 all8; Z=+1.5 (10.5,{10.5,11.5,12.5}); Z=+2.5 (10.5,{10.5,11.5}); Z=+3.5 (10.5,10.5) | UNIFIED VALUE RULE PINNED: middle rows ARE rDec-shifted (row2=29), and marker k2=(31,1) broke the fwd-running-max hypothesis (fit ny≤3 coincidentally). One rule for markers AND content: value_i = 33−(seq[0] if i==0 else max(seq[i−1:])), run_i = max(seq[i:]); seq = profile (content) / row-diffs (markers). All 11 refs byte-exact. LOW byte-exact uniform-d3 2×4. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
