@@ -55,6 +55,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3014 | Build U — z=0 straddle, 2×2, depth varying along Y (Hdepth=[[3,2],[2,2]]), LOW 2 deep, 13 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all4; Z=+1.5 only (10.5,10.5) | Y-VARYING depth byte-exact FIRST TRY, zero code change. Heightmap encodes y-variation in cluster content ((30,2) runs); seam marker from ROW-0 diff (32,1) composes on top. LOW byte-exact uniform-d3. First per-row depth variation validated → 2D relief across z=0 basically composes. |
 
+| 3016 | Build V — z=0 straddle, 2×2, tall column at (10.5,11.5) (Hdepth=[[2,3],[2,2]]), LOW 2 deep, 13 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all4; Z=+1.5 only (10.5,11.5) | MARKER RULE PINNED: ref marker (33,1) — BOTH prior hypotheses wrong. Marker k: value = 33−diff(row k), run = MAX diff over rows (parts key off different rows; 3014 (1,0)→(32,1), 3016 (0,1)→(33,1)). Encoded; all 9 varying/uniform cases byte-exact. LOW byte-exact uniform-d3. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

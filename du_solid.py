@@ -1186,14 +1186,17 @@ def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
     """CLEAN-form +Z chunk of a z=0 seam with PER-COLUMN depth (relief crossing z=0).
     Hdepth[xi][yi] = that column's depth (= #real +Z layers + 1 boundary ghost). The
     HIGH chunk = gen_heightmap_unified(Hdepth), with each INTERIOR cluster REBUILT as
-    opener + (ny-1) transition markers (33-diff, diff), diff=|Hdepth[c-1][0]-Hdepth[c][0]|
-    + the real last row -- discarding the heightmap's relief filler (A1 descent/peak
-    encoding). Decls from Hdepth+1 (declare overlap cell); constant first-decl -1 /
-    preval +1; nx floor-step. Reduces to the uniform clean form at diff=0. Byte-exact vs
-    3004(diff1)/3006(diff2)/3008(step-up) + uniform 2983/2990 + nx=3 descending 3010.
-    REQUIRES low_real >= 2 (clean form). VALIDATED: uniform nx/ny<=3, varying nx<=3 ny=2
-    (descent). DEFERRED (need builds): ascending/peak/valley nx>2, ny>2 per-row varying,
-    degenerate (low_real==1) varying."""
+    opener + (ny-1) transition markers + the real last row -- discarding the heightmap's
+    relief filler (A1 descent/peak encoding). Marker k (per ghost row): value =
+    33 - diff(row k), run = MAX diff over all rows (diff(row) = |Hdepth[c-1][row] -
+    Hdepth[c][row]|); the two parts key off DIFFERENT rows (pinned by 3014 tall@row0
+    -> (32,1) vs 3016 tall@row1 -> (33,1)). Decls from Hdepth+1 (declare overlap cell);
+    constant first-decl -1 / preval +1; nx floor-step. Reduces to the uniform clean form
+    at diff=0. Byte-exact vs 3004(diff1)/3006(diff2)/3008(step-up)/3010(nx=3 descending)/
+    3012(peak)/3014(y-varying row0)/3016(y-varying row1) + uniform 2983/2990.
+    REQUIRES low_real >= 2 (clean form). DEFERRED (need builds): ny>2 mixed per-row
+    diffs (value-vs-run row attribution beyond ny=2), valley nx>2, degenerate
+    (low_real==1) varying."""
     nx = len(Hdepth); ny = len(Hdepth[0])
     gA = gen_heightmap_unified(Hdepth, lx0=lx0, ly0=ly0, lz0=-1)
     f0, clusters = _split_fg_clusters(gA)
@@ -1201,10 +1204,11 @@ def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
     fg = bytearray(); removed = 0
     for ci, cl in enumerate(clusters):
         if 1 <= ci <= nx - 1:                             # interior cluster -> rebuild
-            diff = abs(Hdepth[ci-1][0] - Hdepth[ci][0])
+            diffs = [abs(Hdepth[ci-1][r] - Hdepth[ci][r]) for r in range(ny)]
+            dmax = max(diffs)
             fg += cl[0]                                   # opener
-            for _ in range(ny - 1):
-                fg += _zgrp(33 - diff, diff)              # transition marker(s)
+            for k in range(ny - 1):
+                fg += _zgrp(33 - diffs[k], dmax)          # marker: value per-row, run max
             fg += cl[-1]                                  # real last row
             removed += (len(cl) - (ny + 1)) * 8           # discarded relief filler
         else:
