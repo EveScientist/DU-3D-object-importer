@@ -169,6 +169,13 @@ def _(num=3038):
     assert D.gen_seam_y0_low(2) == c[LOW_Y], "LOW"
 
 
+@case("y0_3044_h2")
+def _(num=3044):
+    c = chunks(num)
+    assert D.gen_seam_y0_high(2, h=2) == c[HIGH_Y], "HIGH"
+    assert D.gen_seam_y0_low(2, h=2) == c[LOW_Y], "LOW"
+
+
 def main():
     passed = failed = 0
     for name, fn in CASES:

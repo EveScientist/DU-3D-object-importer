@@ -81,6 +81,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3042 | Build AG — x=0 straddle slab, 4 cols × 2 rows × 3 tall, 24 vox | X∈{−1.5,−0.5,+0.5,+1.5}, Y∈{10.5,11.5}, Z∈{10.5,11.5,12.5} | (8,8,8)+(7,8,8) | h=3: BOTH target predictions held (filler = (h−2,0)=(1,0) ✓; ghost-block marker 31 = 33−(h−1) ✓). NEW SURPRISE: ALL decl third-bytes (the "constant 2") = max(2,h)=3, both chunks — x=0-SEAM-SPECIFIC (plain heightmaps + z=0 seams keep 2 at any h). Added _seam_x0_decl_third. Byte-exact both chunks; suite 30/30. |
 
+| 3044 | Build AH — y=0 straddle slab, 2 cols × 4 rows (2/side) × 2 tall, 16 vox | X∈{10.5,11.5}, Y∈{−1.5,−0.5,+0.5,+1.5}, Z∈{10.5,11.5} | (8,8,8)+(8,7,8) | y=0 h=2: row-flavored fillers, OWN GEOMETRY — only INTERIOR x-clusters transform (both edges plain; narrower than x=0's all-but-far-edge). HIGH: opener + rows 0..ny−2 → run0+(h−2,0) filler, LAST row survives (ghost row first). LOW: opener survives, ALL rows transform (ghost row last). +24B, decls untouched. Coded _seam_y0_interior_fillers; byte-exact both chunks; suite 31/31. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

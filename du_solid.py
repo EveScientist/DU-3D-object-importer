@@ -1321,7 +1321,10 @@ def gen_seam_y0_high(n_real, nx=2, h=1, lx0=10, lz0=10):
     (8,8,8) (n_real=2). VALIDATED at nx=2, h=1, n_real=2 only."""
     gB = gen_heightmap_unified([[h] * (n_real + 2)] * nx, lx0=lx0, ly0=-2, lz0=lz0)
     gA = gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=-1, lz0=lz0)
-    return (gB[:_fg0(gB)] + gA[_fg0(gA):])[:-2]
+    out = (gB[:_fg0(gB)] + gA[_fg0(gA):])[:-2]
+    if h >= 2:
+        out = _seam_y0_interior_fillers(out, n_real + 1, h, side='high')
+    return out
 
 
 def gen_seam_y0_low(n_real, nx=2, h=1, lx0=10, lz0=10):
@@ -1329,7 +1332,46 @@ def gen_seam_y0_low(n_real, nx=2, h=1, lx0=10, lz0=10):
     ghost row = PLAIN (n_real+1)-row plate at ly0 = 32-n_real, no transform.
     Byte-exact vs 3038 (8,7,8) (n_real=2; CV=215>160 -- an x=0-LOW-style CV<=160
     band shift may exist here too, unprobed)."""
-    return gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
+    g = gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
+    if h >= 2:
+        g = _seam_y0_interior_fillers(g, n_real + 1, h, side='low')
+    return g
+
+
+def _seam_y0_interior_fillers(g, ny, h, side):
+    """h>=2 transform for y=0 seam chunks (pinned by 3044, h=2): only the INTERIOR
+    x-clusters transform (both edge clusters stay plain -- narrower than x=0's
+    all-but-far-edge rule). Within a transformed cluster, each affected group ->
+    run 0 + an (h-2, 0) filler appended:
+      side='high': opener + rows 0..ny-2 affected, LAST row survives (the row
+                   farthest from the seam; HIGH's ghost row is first).
+      side='low' : opener survives, ALL rows 0..ny-1 affected (LOW's ghost row
+                   is last). Filler value h-2 by analogy with x=0 (h=2 only probed)."""
+    f0, clusters = _split_fg_clusters(g)
+    n_cl = len(clusters)
+    fg = bytearray()
+    for ci, cl in enumerate(clusters):
+        interior = 1 <= ci <= n_cl - 2
+        if not interior:
+            for grp in cl: fg += grp
+        elif side == 'high':
+            for k, grp in enumerate(cl):
+                if k < len(cl) - 1:
+                    g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
+                    fg += bytes(g2) + _zgrp(h - 2, 0)
+                else:
+                    fg += grp
+        else:
+            fg += cl[0]
+            for grp in cl[1:]:
+                g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
+                fg += bytes(g2) + _zgrp(h - 2, 0)
+        if ci < n_cl - 1: fg += bytes([255, 0]) * 4
+    orig = bytearray()
+    for ci, cl in enumerate(clusters):
+        for grp in cl: orig += grp
+        if ci < n_cl - 1: orig += bytes([255, 0]) * 4
+    return g[:f0] + bytes(fg) + g[f0 + len(orig):]
 
 
 def _seam_x0_decl_third(g, h):
