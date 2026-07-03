@@ -1307,10 +1307,11 @@ def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
 
 # ── x=0 / y=0 OCTANT SEAMS (spatial column/row axes) ────────────────────────────
 # Unlike z=0 (depth axis -> special clusters), a shape straddling x=0 or y=0 makes
-# two chunks that are just PLAIN plates evaluated at the ghost position (one step
-# into the negative half: lx0/ly0 = -1 for the +side chunk, 31 for the -side chunk).
-# y=0 is exactly that. x=0 (primary scan axis) additionally forces the octant-edge
-# base-position jitter (pre/fg0 -2, L -4). Byte-exact vs 2941 (x=0) / 2943 (y=0).
+# two chunks that are just PLAIN plates evaluated at the ghost position. NOTE
+# 2026-07-03: the original minimal derivation (2941/2943 + _x0_jitter) is OBSOLETE —
+# those exports are unknown-position and don't match under current (bw/bn-fixed) code.
+# x=0 re-derived from known-position 3032/3036 (see gen_seam_x0_high/low below).
+# y=0 still on the old model pending a fresh known-position reference.
 def gen_seam_y0_high(nx, ly0_ghost=-1, lz0=10):
     """+Y chunk (cy=8) of a y=0 seam: nx cols, 1 real row (y=0.5) + ghost row (y=-0.5).
     = plain (nx x 2) plate at ly0=-1. Byte-exact vs 2943 (8,8,8)."""
@@ -1322,25 +1323,38 @@ def gen_seam_y0_low(nx, ly0_low=31, lz0=10):
     return gen_heightmap_unified([[1] * 2] * nx, lx0=10, ly0=ly0_low, lz0=lz0)
 
 
-def _x0_jitter(g):
-    """Apply the octant-edge base-position jitter to an x=0 ghost-plate: drop one
-    00ff pad pair before the preval (pre/fg0 -2) and one trailing pair (L -4 total)."""
-    g = bytearray(g); f0 = _fg0(g); pv = None
-    for i in range(f0 - 2, 0, -2):
-        if g[i+1] == 0 and g[i] not in (0, 255) and g[i] != 1: pv = i; break
-    del g[pv-2:pv]; del g[-2:]
-    return bytes(g)
+def gen_seam_x0_high(n_real, ny=2, h=1, ly0=10, lz0=10):
+    """+X chunk (cx=8) of an x=0 seam: n_real real cols (x=0.5..) + 1 boundary ghost
+    col. = plain (n_real+1)-wide plate at lx0=-1, with a WIDTH-INVARIANT head
+    transform (pinned by 3032 n_real=2 / 3036 n_real=3): prepend the leading
+    ghost-decl block [0,255,0, CV(lx0=-2),1,2,h-1,0, 33,1,2,h-1] after which 2 pad
+    pairs are dropped, and first-decl value += 44. VALIDATED at ny=2, h=1 only
+    (the +44 and block layout may scale with ny/h -- needs builds)."""
+    g = gen_heightmap_unified([[h] * ny] * (n_real + 1), lx0=-1, ly0=ly0, lz0=lz0)
+    cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
+    block = bytes([0, 255, 0, cvm2, 1, 2, h - 1, 0, 33, 1, 2, h - 1])
+    fd = _first_decl(g)                                   # g[fd] = first decl value
+    return block + g[:fd - 4] + bytes([(g[fd] + 44) % 256]) + g[fd + 1:]
 
 
-def gen_seam_x0_high(ny, ly0=10, lz0=10):
-    """+X chunk (cx=8) of an x=0 seam: 1 real col (x=0.5) + ghost col (x=-0.5).
-    = 2-wide plate at the ghost col lx0=-1, plus the octant-edge jitter. Byte-exact vs 2941 (8,8,8)."""
-    return _x0_jitter(gen_heightmap_unified([[1] * ny] * 2, lx0=-1, ly0=ly0, lz0=lz0))
-
-
-def gen_seam_x0_low(ny, ly0=10, lz0=10):
-    """-X chunk (cx=7) of an x=0 seam: 2-wide plate at lx0=31 + the octant-edge jitter. Byte-exact vs 2941 (7,8,8)."""
-    return _x0_jitter(gen_heightmap_unified([[1] * ny] * 2, lx0=31, ly0=ly0, lz0=lz0))
+def gen_seam_x0_low(n_real, ny=2, h=1, ly0=10, lz0=10):
+    """-X chunk (cx=7) of an x=0 seam: n_real real cols (lx 32-n_real..31) + 1
+    boundary ghost col = plain (n_real+1)-wide plate at lx0 = 32-n_real. CV-band
+    jitter: iff CV(lx0) <= 160, move one pad pair from the tail to the head
+    (3036 lx0=29 CV=6 needs it; 3032 lx0=30 CV=207 does not). Band edge at 160
+    assumed from the bw band -- only 2 CV points probed."""
+    lx0 = 32 - n_real
+    g = gen_heightmap_unified([[h] * ny] * (n_real + 1), lx0=lx0, ly0=ly0, lz0=lz0)
+    CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256
+    if CV <= 160:
+        g = bytearray(g)
+        f0 = _fg0(g)
+        g[f0:f0] = bytes([255, 0]); del g[-2:]            # fg0 +2, tail absorbs
+        fd = _first_decl(g); de = _last_decl_end(g)
+        g[fd:fd] = bytes([255, 0])                        # pre +2 ...
+        del g[de+2:de+4]                                  # ... absorbed after decl run
+        g = bytes(g)
+    return g
 
 
 def _last_decl_end(s):

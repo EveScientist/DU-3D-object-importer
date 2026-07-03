@@ -73,10 +73,10 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3034 | (AD mis-build — axes swapped) 2×1 bar, 3 up / 3 down crossing z=0, 12 vox | actual: 2 cols × 1 row × 6 tall through z=0 (intended AD plate rotated) | (8,8,8)+(8,8,7) | ACCIDENTAL FIRST ny=1 z-seam datapoint: HIGH matched unchanged; LOW off 2 bytes → at ny=1 the single row is first AND last, last-row rule wins (run kept, not zeroed). Fixed in gen_seam_z_low (ny>1 guard); all regressions + varying reductions clean. |
 
+| 3036 | Build AD — x=0 straddle plate, 6 cols × 2 rows × 1 tall, 12 vox | X∈{−2.5,−1.5,−0.5,+0.5,+1.5,+2.5}, Y∈{10.5,11.5}, Z=10.5 | (8,8,8)+(7,8,8) | B2 x=0 WIDTH PINNED: HIGH transform WIDTH-INVARIANT (same ghost block CV(−2)=175 + first-decl +44 as 3032) — byte-exact. LOW = plain 4w@lx0=29 + CV-band layout shift (CV=6≤160: pre +2 pair before first decl absorbed after decl run, fg0 +2 absorbed at tail; 3032 CV=207>160 needs none). gen_seam_x0_high/low rewritten general — all 4 chunks (2 builds × 2) byte-exact. Band edge 160 assumed from bw band (2 CV points). |
+
 ## Pending (spec'd, awaiting export number)
-- **Build AD (re-request)** — x=0 straddle plate, 6 cols × 2 rows × 1 tall, 12 vox:
-  X∈{−2.5,−1.5,−0.5,+0.5,+1.5,+2.5}, Y∈{10.5,11.5}, Z=10.5. Chunks (8,8,8)+(7,8,8).
-  Purpose: B2 — width scaling: LOW predicted plain 4w@lx0=29; HIGH ghost-block value CV(−2) fixed or CV(−n)? first-decl delta +44 constant?
+- (none)
 
 ## Generated import tests
 - **tests/z0_novel_pairing_gen.blueprint** (2026-07-03) — novel pairing: HIGH = 3014's y-varying
