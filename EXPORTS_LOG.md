@@ -57,6 +57,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3016 | Build V — z=0 straddle, 2×2, tall column at (10.5,11.5) (Hdepth=[[2,3],[2,2]]), LOW 2 deep, 13 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all4; Z=+1.5 only (10.5,11.5) | MARKER RULE PINNED: ref marker (33,1) — BOTH prior hypotheses wrong. Marker k: value = 33−diff(row k), run = MAX diff over rows (parts key off different rows; 3014 (1,0)→(32,1), 3016 (0,1)→(33,1)). Encoded; all 9 varying/uniform cases byte-exact. LOW byte-exact uniform-d3. |
 
+| 3018 | Build W — z=0 straddle, 2×3, y-graded +Z (Hdepth=[[4,3,2],[2,2,2]]), LOW 2 deep, 21 vox | X∈{10.5,11.5}, Y∈{10.5,11.5,12.5}; Z=−1.5/−0.5/+0.5 all6; Z=+1.5 (10.5,10.5)+(10.5,11.5); Z=+2.5 (10.5,10.5) | ny=3 CRACKED THE FULL MARKER MODEL: ref markers (31,2),(31,1) → value = 33−FWD running max(diffs[0..k]), run = BWD running max(diffs[k..]) (mirrors A1 rInc/rDec). ALSO: last content row of every cluster = 33−BWD running max(profile[ny−2:]) (y-descending tails differ from raw heightmap: (30,2) not (29,2)); interior profile = ADJACENT-pair max, not running max from col0 (pinned by 3010 regression). All 10 refs byte-exact. LOW byte-exact uniform-d3 2×3. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

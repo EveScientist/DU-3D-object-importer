@@ -1187,32 +1187,50 @@ def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
     Hdepth[xi][yi] = that column's depth (= #real +Z layers + 1 boundary ghost). The
     HIGH chunk = gen_heightmap_unified(Hdepth), with each INTERIOR cluster REBUILT as
     opener + (ny-1) transition markers + the real last row -- discarding the heightmap's
-    relief filler (A1 descent/peak encoding). Marker k (per ghost row): value =
-    33 - diff(row k), run = MAX diff over all rows (diff(row) = |Hdepth[c-1][row] -
-    Hdepth[c][row]|); the two parts key off DIFFERENT rows (pinned by 3014 tall@row0
-    -> (32,1) vs 3016 tall@row1 -> (33,1)). Decls from Hdepth+1 (declare overlap cell);
-    constant first-decl -1 / preval +1; nx floor-step. Reduces to the uniform clean form
-    at diff=0. Byte-exact vs 3004(diff1)/3006(diff2)/3008(step-up)/3010(nx=3 descending)/
-    3012(peak)/3014(y-varying row0)/3016(y-varying row1) + uniform 2983/2990.
-    REQUIRES low_real >= 2 (clean form). DEFERRED (need builds): ny>2 mixed per-row
-    diffs (value-vs-run row attribution beyond ny=2), valley nx>2, degenerate
+    relief filler (A1 descent/peak encoding). Marker k mirrors A1's rInc/rDec running-max
+    architecture over the per-row diffs (diff(r) = |Hdepth[c-1][r] - Hdepth[c][r]|):
+    value = 33 - FWD running max(diffs[0..k]), run = BWD running max(diffs[k..])
+    (pinned by 3014 (1,0)->(32,1), 3016 (0,1)->(33,1), 3018 (2,1,0)->(31,2),(31,1)).
+    Additionally the LAST content row of EVERY cluster takes value = 33 - BWD running
+    max(profile[ny-2:]) (profile = own column for edge clusters, ADJACENT-pair max
+    for interiors -- not a running max from col0, pinned by 3010) -- differs from the
+    raw heightmap only for y-descending tails (3018 (4,3,2) -> (30,2) not (29,2)). Decls from Hdepth+1
+    (declare overlap cell); constant first-decl -1 / preval +1; nx floor-step. Reduces
+    to the uniform clean form at diff=0. Byte-exact vs 3004/3006/3008/3010(nx=3 desc)/
+    3012(peak)/3014/3016(y-varying)/3018(ny=3 y-graded) + uniform 2983/2990.
+    REQUIRES low_real >= 2 (clean form). DEFERRED (need builds): ny>=4 middle-row
+    values (rDec-shift vs heightmap ambiguous at ny<=3), valley nx>2, degenerate
     (low_real==1) varying."""
     nx = len(Hdepth); ny = len(Hdepth[0])
     gA = gen_heightmap_unified(Hdepth, lx0=lx0, ly0=ly0, lz0=-1)
     f0, clusters = _split_fg_clusters(gA)
+    # cluster profiles: edge0 = col0; interior ci = elementwise max of the ADJACENT
+    # col pair (ci-1, ci) -- NOT a running max from col0 (pinned by 3010 cluster2
+    # last row (30,3) = max(col1,col2), not max(col0..col2)); final = last col
+    prof = []
+    for ci in range(nx + 1):
+        if ci == 0: prof.append(list(Hdepth[0]))
+        elif ci < nx:
+            prof.append([max(a, b) for a, b in zip(Hdepth[ci-1], Hdepth[ci])])
+        else: prof.append(list(Hdepth[nx - 1]))
     clgap = bytes([255, 0]) * (4 - (ny >= 6))
     fg = bytearray(); removed = 0
     for ci, cl in enumerate(clusters):
+        last = bytearray(cl[-1])                          # last content row: rDec value
+        if ny >= 2:
+            last[0] = (33 - max(prof[ci][ny-2:])) % 256
         if 1 <= ci <= nx - 1:                             # interior cluster -> rebuild
             diffs = [abs(Hdepth[ci-1][r] - Hdepth[ci][r]) for r in range(ny)]
-            dmax = max(diffs)
             fg += cl[0]                                   # opener
+            rinc = 0
             for k in range(ny - 1):
-                fg += _zgrp(33 - diffs[k], dmax)          # marker: value per-row, run max
-            fg += cl[-1]                                  # real last row
+                rinc = max(rinc, diffs[k])
+                fg += _zgrp(33 - rinc, max(diffs[k:]))    # marker: rInc value, rDec run
+            fg += bytes(last)
             removed += (len(cl) - (ny + 1)) * 8           # discarded relief filler
         else:
-            for grp in cl: fg += grp
+            for grp in cl[:-1]: fg += grp
+            fg += bytes(last)
         if ci < len(clusters) - 1: fg += clgap
     total = len(gA) - f0 - removed
     while len(fg) < total: fg += bytes([255, 0])
