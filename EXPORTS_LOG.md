@@ -89,6 +89,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3050 | Build AK — x=0 straddle hump, step of 2 (heights 1,3|3,1), 2 rows, 16 vox | Z=10.5: all 4 cols × 2 rows; Z=11.5+Z=12.5: X=±0.5 only | (8,8,8)+(7,8,8) | OFFSETS ARE FIXED CONSTANTS: 3050 = 3048 + pure height-scaling (runs 2→3, values 31→30, decl fields +1, x-marker 162=200−h−35, block marker 31=33−(h−1) — ALL known rules). T1z +14/+42 UNCHANGED at step 2. 16-byte form pinned: [val,1,run, T0,0, T1,0, T2,0, h−2] (final byte was 0 at h=2, 1 at h=3 = h−2). Transition geometry shape is step-size-independent. |
 
+| 3052 | Build AL — x=0 one-sided step AT boundary (heights 2,2|1,1), 2 rows, 12 vox | Z=10.5: all 4 cols × 2 rows; Z=11.5: X∈{−1.5,−0.5} only | (8,8,8)+(7,8,8) | STEP-AT-BOUNDARY = NO transition geometry (zero 16-byte groups) — pure flat clusters, each side own heights, ghosts copy neighbors (HIGH ghost h2, LOW ghost h1); cliff face = chunk face. 3-vertex form ONLY when step is 1 col AWAY from boundary (slope spans it). Fillers per-cluster by own height (h1 clusters none); LOW c2 (h2) unexpectedly plain — map in generator work. HIGH clusters: [h2+filler ghost],[h2 plain],[h1],[h1]; LOW: [h2 plain far],[h2+filler],[h2 plain],[h1 ghost]. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
