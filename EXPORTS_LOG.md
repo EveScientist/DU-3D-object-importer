@@ -83,6 +83,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3044 | Build AH — y=0 straddle slab, 2 cols × 4 rows (2/side) × 2 tall, 16 vox | X∈{10.5,11.5}, Y∈{−1.5,−0.5,+0.5,+1.5}, Z∈{10.5,11.5} | (8,8,8)+(8,7,8) | y=0 h=2: row-flavored fillers, OWN GEOMETRY — only INTERIOR x-clusters transform (both edges plain; narrower than x=0's all-but-far-edge). HIGH: opener + rows 0..ny−2 → run0+(h−2,0) filler, LAST row survives (ghost row first). LOW: opener survives, ALL rows transform (ghost row last). +24B, decls untouched. Coded _seam_y0_interior_fillers; byte-exact both chunks; suite 31/31. |
 
+| 3046 | Build AI — y=0 straddle slab, 2 cols × 4 rows (2/side) × 3 tall, 24 vox | X∈{10.5,11.5}, Y∈{−1.5,−0.5,+0.5,+1.5}, Z∈{10.5,11.5,12.5} | (8,8,8)+(8,7,8) | y=0 h=3: BYTE-EXACT AS-IS both chunks, zero code change. Filler h−2 confirmed for y=0; decl-third flip ABSENT (decls keep 2 at h=3) → max(2,h) rule is x=0-SPECIFIC. Suite 32/32. B2 basic height model complete for all 3 axes. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
