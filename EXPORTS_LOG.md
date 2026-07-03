@@ -87,6 +87,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3048 | Build AJ — x=0 straddle height hump (1,2|2,1 across X), 2 rows, 12 vox | Z=10.5: all 4 cols × 2 rows; Z=11.5: X=±0.5 only | (8,8,8)+(7,8,8) | NEW SUB-FORMAT DISCOVERED: 16-byte THREE-VERTEX groups [val,1,run, T0,0, T1,0, T2,0, 0] in boundary-adjacent clusters — T1 z-offsets +14 and +42 (=half voxel) steps — DU generates sub-voxel transition geometry where relief steps cross the seam. Confirmed: ghost cols take across-boundary neighbor height; head transforms unchanged; uniform fillers where expected. HIGH raw @360-432, LOW @720-815 documented. Offset formula (why 14/42, scaling with step size/direction) = NEW FRONTIER, needs dedicated builds. |
 
+| 3050 | Build AK — x=0 straddle hump, step of 2 (heights 1,3|3,1), 2 rows, 16 vox | Z=10.5: all 4 cols × 2 rows; Z=11.5+Z=12.5: X=±0.5 only | (8,8,8)+(7,8,8) | OFFSETS ARE FIXED CONSTANTS: 3050 = 3048 + pure height-scaling (runs 2→3, values 31→30, decl fields +1, x-marker 162=200−h−35, block marker 31=33−(h−1) — ALL known rules). T1z +14/+42 UNCHANGED at step 2. 16-byte form pinned: [val,1,run, T0,0, T1,0, T2,0, h−2] (final byte was 0 at h=2, 1 at h=3 = h−2). Transition geometry shape is step-size-independent. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
