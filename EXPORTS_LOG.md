@@ -75,6 +75,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3036 | Build AD — x=0 straddle plate, 6 cols × 2 rows × 1 tall, 12 vox | X∈{−2.5,−1.5,−0.5,+0.5,+1.5,+2.5}, Y∈{10.5,11.5}, Z=10.5 | (8,8,8)+(7,8,8) | B2 x=0 WIDTH PINNED: HIGH transform WIDTH-INVARIANT (same ghost block CV(−2)=175 + first-decl +44 as 3032) — byte-exact. LOW = plain 4w@lx0=29 + CV-band layout shift (CV=6≤160: pre +2 pair before first decl absorbed after decl run, fg0 +2 absorbed at tail; 3032 CV=207>160 needs none). gen_seam_x0_high/low rewritten general — all 4 chunks (2 builds × 2) byte-exact. Band edge 160 assumed from bw band (2 CV points). |
 
+| 3038 | Build AE — y=0 straddle plate, 2 cols × 4 rows (2/side) × 1 tall, 8 vox | X∈{10.5,11.5}, Y∈{−1.5,−0.5,+0.5,+1.5}, Z=10.5 | (8,8,8)+(8,7,8) | B2 y=0 SOLVED + UNIFIED SEAM PRINCIPLE: LOW = plain plate @ly0=30 byte-exact first try. HIGH = decl region from (rows+2)-plate @ly0=−2 (declares extra overlap row; lead=CV(−2)=119, extra 33/col) + FG region from (rows+1)-plate @ly0=−1, tail −2 — SAME principle as z=0 clean form (decls declare one extra overlap unit). Also REINTERPRETED x=0's "+44": 164 = standard x-marker value — x=0 HIGH decls are those of the (cols+2)-plate @lx0=−2. gen_seam_y0_high/low rewritten; all byte-exact. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

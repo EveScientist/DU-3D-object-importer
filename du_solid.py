@@ -1312,15 +1312,24 @@ def gen_seam_z_high_varying(Hdepth, lx0=10, ly0=10):
 # those exports are unknown-position and don't match under current (bw/bn-fixed) code.
 # x=0 re-derived from known-position 3032/3036 (see gen_seam_x0_high/low below).
 # y=0 still on the old model pending a fresh known-position reference.
-def gen_seam_y0_high(nx, ly0_ghost=-1, lz0=10):
-    """+Y chunk (cy=8) of a y=0 seam: nx cols, 1 real row (y=0.5) + ghost row (y=-0.5).
-    = plain (nx x 2) plate at ly0=-1. Byte-exact vs 2943 (8,8,8)."""
-    return gen_heightmap_unified([[1] * 2] * nx, lx0=10, ly0=ly0_ghost, lz0=lz0)
+def gen_seam_y0_high(n_real, nx=2, h=1, lx0=10, lz0=10):
+    """+Y chunk (cy=8) of a y=0 seam: n_real real rows (y=0.5..) + 1 boundary ghost
+    row. Same principle as z=0's clean form: the DECL region declares ONE EXTRA
+    overlap row (from the (n_real+2)-row plate at ly0=-2 -- lead decl value becomes
+    CV(ly0=-2), one extra 33 marker per column), while the FG region stays the
+    (n_real+1)-row plate at ly0=-1; trailing pad pair trimmed. Byte-exact vs 3038
+    (8,8,8) (n_real=2). VALIDATED at nx=2, h=1, n_real=2 only."""
+    gB = gen_heightmap_unified([[h] * (n_real + 2)] * nx, lx0=lx0, ly0=-2, lz0=lz0)
+    gA = gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=-1, lz0=lz0)
+    return (gB[:_fg0(gB)] + gA[_fg0(gA):])[:-2]
 
 
-def gen_seam_y0_low(nx, ly0_low=31, lz0=10):
-    """-Y chunk (cy=7) of a y=0 seam: plain (nx x 2) mirror plate at ly0=31. Byte-exact vs 2943 (8,7,8)."""
-    return gen_heightmap_unified([[1] * 2] * nx, lx0=10, ly0=ly0_low, lz0=lz0)
+def gen_seam_y0_low(n_real, nx=2, h=1, lx0=10, lz0=10):
+    """-Y chunk (cy=7) of a y=0 seam: n_real real rows (ly 32-n_real..31) + 1 boundary
+    ghost row = PLAIN (n_real+1)-row plate at ly0 = 32-n_real, no transform.
+    Byte-exact vs 3038 (8,7,8) (n_real=2; CV=215>160 -- an x=0-LOW-style CV<=160
+    band shift may exist here too, unprobed)."""
+    return gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
 
 
 def gen_seam_x0_high(n_real, ny=2, h=1, ly0=10, lz0=10):
