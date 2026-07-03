@@ -72,6 +72,13 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 ## Pending (spec'd, awaiting export number)
 - (none)
 
+## Generated import tests
+- **tests/z0_novel_pairing_gen.blueprint** (2026-07-03) — novel pairing: HIGH = 3014's y-varying
+  surface (gen_seam_z_high_varying([[3,2],[2,2]]), mc 635) + LOW = 3024's deep varying ground
+  (gen_seam_z_low_varying([[5,5],[3,3]]), mc 603); template/envelope 3028; round-trip verified.
+  Expected deploy: 17 vox — 2×2 block Z=−1.5..+0.5, (10.5,10.5) up to +1.5, X=10.5 pair down to −3.5.
+  **DEPLOYED PERFECTLY in-game 2026-07-03** — varying z=0 seam model hardware-validated end to end.
+
 ## Frontier (next session)
 - **nx>2 varying: peak VALIDATED (3012)** — ascending+descending+apex byte-exact.
   Valley ([[4,4],[2,2],[4,4]]) still unvalidated but same mechanism; low priority.
