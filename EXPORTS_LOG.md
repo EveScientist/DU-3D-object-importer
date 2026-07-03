@@ -79,6 +79,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3040 | Build AF — x=0 straddle slab, 4 cols × 2 rows × 2 tall, 16 vox | X∈{−1.5,−0.5,+0.5,+1.5}, Y∈{10.5,11.5}, Z∈{10.5,11.5} | (8,8,8)+(7,8,8) | h=2: PREDICTION CONFIRMED — first-decl 163 = x-marker formula (200−h−35(ny−1)); ghost-block h−1 fields track h, block marker 33→32 (33−(h−1), h=3 would distinguish const −1). NEW: h≥2 interior-filler transform — every FG cluster EXCEPT the far-edge one takes z=0-degenerate form (first ny−1 rows → run 0 + (h−2,0) filler); HIGH far edge = last cluster, LOW = first (HIGH's c0 counts interior because decls claim an extra ghost cluster). +24B = 3 fillers ×8. Coded _seam_x0_interior_fillers; all byte-exact incl regressions. |
 
+| 3042 | Build AG — x=0 straddle slab, 4 cols × 2 rows × 3 tall, 24 vox | X∈{−1.5,−0.5,+0.5,+1.5}, Y∈{10.5,11.5}, Z∈{10.5,11.5,12.5} | (8,8,8)+(7,8,8) | h=3: BOTH target predictions held (filler = (h−2,0)=(1,0) ✓; ghost-block marker 31 = 33−(h−1) ✓). NEW SURPRISE: ALL decl third-bytes (the "constant 2") = max(2,h)=3, both chunks — x=0-SEAM-SPECIFIC (plain heightmaps + z=0 seams keep 2 at any h). Added _seam_x0_decl_third. Byte-exact both chunks; suite 30/30. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

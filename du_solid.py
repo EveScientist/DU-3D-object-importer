@@ -1332,6 +1332,21 @@ def gen_seam_y0_low(n_real, nx=2, h=1, lx0=10, lz0=10):
     return gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
 
 
+def _seam_x0_decl_third(g, h):
+    """x=0-seam-specific (3042, h=3): ALL declarations' third byte = max(2, h)
+    (plain heightmaps and z=0 seams keep 2 at any h; only x=0 seam chunks flip).
+    Matches decls as [val,1,2,d,0] with val not 0/255 and rewrites in place."""
+    if h <= 2:
+        return g
+    g = bytearray(g); i = 0
+    while i < len(g) - 5:
+        if g[i+1] == 1 and g[i+2] == 2 and g[i+4] == 0 and g[i] not in (0, 255):
+            g[i+2] = max(2, h); i += 5
+        else:
+            i += 1
+    return bytes(g)
+
+
 def _seam_x0_interior_fillers(g, ny, h, far_edge):
     """h>=2 transform for x=0/y=0 seam chunks (pinned by 3040): every FG cluster
     EXCEPT the far-edge one (the only true edge in the cross-chunk sense; 'last'
@@ -1374,11 +1389,13 @@ def gen_seam_x0_high(n_real, ny=2, h=1, ly0=10, lz0=10):
     g = gen_heightmap_unified([[h] * ny] * (n_real + 1), lx0=-1, ly0=ly0, lz0=lz0)
     if h >= 2:
         g = _seam_x0_interior_fillers(g, ny, h, far_edge='last')
+    d2 = max(2, h)                                        # decl 3rd byte: 2 at h<=2, h above (3042)
     cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
-    block = bytes([0, 255, 0, cvm2, 1, 2, h - 1, 0, (33 - (h - 1)) % 256, 1, 2, h - 1])
+    block = bytes([0, 255, 0, cvm2, 1, d2, h - 1, 0, (33 - (h - 1)) % 256, 1, d2, h - 1])
     fd = _first_decl(g)                                   # g[fd] = first decl value
     xmark = (200 - h - 35 * (ny - 1)) % 256               # standard x-marker (was '+44')
-    return block + g[:fd - 4] + bytes([xmark]) + g[fd + 1:]
+    out = block + g[:fd - 4] + bytes([xmark]) + g[fd + 1:]
+    return _seam_x0_decl_third(out, h)
 
 
 def gen_seam_x0_low(n_real, ny=2, h=1, ly0=10, lz0=10):
@@ -1391,6 +1408,7 @@ def gen_seam_x0_low(n_real, ny=2, h=1, ly0=10, lz0=10):
     g = gen_heightmap_unified([[h] * ny] * (n_real + 1), lx0=lx0, ly0=ly0, lz0=lz0)
     if h >= 2:
         g = _seam_x0_interior_fillers(g, ny, h, far_edge='first')
+    g = _seam_x0_decl_third(g, h)
     CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256
     if CV <= 160:
         g = bytearray(g)
