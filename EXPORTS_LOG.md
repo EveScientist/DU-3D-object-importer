@@ -61,8 +61,12 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3020 | Build X — z=0 straddle, 2×4, y-staircase +Z (Hdepth=[[5,4,3,2],[2,2,2,2]]), LOW 2 deep, 30 vox | X∈{10.5,11.5}, Y∈{10.5,11.5,12.5,13.5}; Z=−1.5/−0.5/+0.5 all8; Z=+1.5 (10.5,{10.5,11.5,12.5}); Z=+2.5 (10.5,{10.5,11.5}); Z=+3.5 (10.5,10.5) | UNIFIED VALUE RULE PINNED: middle rows ARE rDec-shifted (row2=29), and marker k2=(31,1) broke the fwd-running-max hypothesis (fit ny≤3 coincidentally). One rule for markers AND content: value_i = 33−(seq[0] if i==0 else max(seq[i−1:])), run_i = max(seq[i:]); seq = profile (content) / row-diffs (markers). All 11 refs byte-exact. LOW byte-exact uniform-d3 2×4. |
 
+| 3022 | Build Y — z=0 straddle, 2×2, varying −Z depth (up 2 all; down 3 X=10.5 / down 2 X=11.5), 18 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all4; Z=−2.5 only X=10.5 pair | STRUCTURAL SURPRISE: LOW = byte-exact UNIFORM min-depth d3 (z=−2.5 layer ABSENT from LOW); the extra below-min layer folds into HIGH = gen_seam_z_high_varying([[4,4],[3,3]]) byte-exact. Only 2 h3 chunks (verified). HIGH param = up+ghost+extra-below; additive-vs-flag ambiguous at extra=1 → Build Z. |
+
 ## Pending (spec'd, awaiting export number)
-- (none)
+- **Build Z** — z=0 straddle, 2×2, up 2 all, down 4 X=10.5 / down 2 X=11.5 (extra=2), 20 vox:
+  X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all4; Z=−2.5/−3.5 only X=10.5 pair.
+  Purpose: disambiguate fold-in — additive predicts HIGH varying [[5,5],[3,3]]; flag predicts [[4,4],[3,3]]; LOW expected uniform min d3.
 
 ## Frontier (next session)
 - **nx>2 varying: peak VALIDATED (3012)** — ascending+descending+apex byte-exact.
