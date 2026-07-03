@@ -67,6 +67,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3026 | Build AA — z=0 straddle, 3×2, up 2 all; down 2/3/4 across X (extras 0/1/2), 30 vox | X∈{10.5,11.5,12.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all6; Z=−2.5 X∈{11.5,12.5} pairs; Z=−3.5 X=12.5 pair | CHOICE IS WHOLE-CHUNK: HIGH byte-exact plain uniform-min d3; LOW carries ALL variation incl the extra=1 col ([[3,3],[4,4],[5,5]]). Also pinned SIGNED step rules (build was ascending, 3024 descending): x-marker decl += s(c) signed; interior opener += min(0,s); final opener += max(0,s(last)). gen_seam_z_low_varying byte-exact 3024+3026+8 uniform reductions. |
 
+| 3028 | Build AB — z=0 straddle, 2×2, BOTH sides varying: X=10.5 up 2/down 4, X=11.5 up 1/down 2, 18 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5 X=10.5 pair; Z=+0.5/−0.5/−1.5 all4; Z=−2.5/−3.5 X=10.5 pair | INDEPENDENCE PROVEN, zero new code: HIGH == gen_seam_z_high_varying([[3,3],[2,2]]) byte-exact (identical to 3004/P despite varying ground below); LOW == gen_seam_z_low_varying([[5,5],[3,3]]) byte-exact (identical to 3024/Z despite varying surface above). VARYING z=0 SEAM GENERATIVELY COMPLETE for validated envelope. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
