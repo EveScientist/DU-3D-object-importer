@@ -53,6 +53,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3012 | Build T — varying-depth z=0 straddle, 3-col PEAK (2/4/2), LOW 2 deep, 22 vox | X∈{10.5,11.5,12.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all6; Z=+1.5 X=11.5; Z=+2.5 X=11.5 | PEAK byte-exact FIRST TRY: gen_seam_z_high_varying([[2,2],[4,4],[2,2]]), both markers (31,2) as predicted. Ascending + descending + apex all confirmed — cluster-rebuild handles arbitrary relief direction. LOW byte-exact uniform-d3. |
 
+| 3014 | Build U — z=0 straddle, 2×2, depth varying along Y (Hdepth=[[3,2],[2,2]]), LOW 2 deep, 13 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=−1.5/−0.5/+0.5 all4; Z=+1.5 only (10.5,10.5) | Y-VARYING depth byte-exact FIRST TRY, zero code change. Heightmap encodes y-variation in cluster content ((30,2) runs); seam marker from ROW-0 diff (32,1) composes on top. LOW byte-exact uniform-d3. First per-row depth variation validated → 2D relief across z=0 basically composes. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
