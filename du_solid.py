@@ -1332,6 +1332,38 @@ def gen_seam_y0_low(n_real, nx=2, h=1, lx0=10, lz0=10):
     return gen_heightmap_unified([[h] * (n_real + 1)] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
 
 
+def _seam_x0_interior_fillers(g, ny, h, far_edge):
+    """h>=2 transform for x=0/y=0 seam chunks (pinned by 3040): every FG cluster
+    EXCEPT the far-edge one (the only true edge in the cross-chunk sense; 'last'
+    for the +side chunk, 'first' for the -side) takes the z=0-degenerate-style
+    interior form: each of the first ny-1 content rows -> run 0 + an (h-2, 0)
+    filler group appended. At h=2 the filler value is 0; the h-2 scaling is
+    z=0-analogous but only h=2 is validated."""
+    f0, clusters = _split_fg_clusters(g)
+    n_cl = len(clusters)
+    skip = n_cl - 1 if far_edge == 'last' else 0
+    fg = bytearray()
+    for ci, cl in enumerate(clusters):
+        fg += cl[0]
+        if ci != skip:
+            for k, grp in enumerate(cl[1:]):
+                if k < ny - 1:
+                    g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
+                    fg += bytes(g2) + _zgrp(h - 2, 0)
+                else:
+                    fg += grp
+        else:
+            for grp in cl[1:]: fg += grp
+        if ci < n_cl - 1: fg += bytes([255, 0]) * 4
+    # preserve the original trailing pad verbatim (fillers extend length; no absorption)
+    orig = bytearray()
+    for ci, cl in enumerate(clusters):
+        for grp in cl: orig += grp
+        if ci < n_cl - 1: orig += bytes([255, 0]) * 4
+    trail = g[f0 + len(orig):]
+    return g[:f0] + bytes(fg) + trail
+
+
 def gen_seam_x0_high(n_real, ny=2, h=1, ly0=10, lz0=10):
     """+X chunk (cx=8) of an x=0 seam: n_real real cols (x=0.5..) + 1 boundary ghost
     col. = plain (n_real+1)-wide plate at lx0=-1, with a WIDTH-INVARIANT head
@@ -1340,10 +1372,13 @@ def gen_seam_x0_high(n_real, ny=2, h=1, ly0=10, lz0=10):
     pairs are dropped, and first-decl value += 44. VALIDATED at ny=2, h=1 only
     (the +44 and block layout may scale with ny/h -- needs builds)."""
     g = gen_heightmap_unified([[h] * ny] * (n_real + 1), lx0=-1, ly0=ly0, lz0=lz0)
+    if h >= 2:
+        g = _seam_x0_interior_fillers(g, ny, h, far_edge='last')
     cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
-    block = bytes([0, 255, 0, cvm2, 1, 2, h - 1, 0, 33, 1, 2, h - 1])
+    block = bytes([0, 255, 0, cvm2, 1, 2, h - 1, 0, (33 - (h - 1)) % 256, 1, 2, h - 1])
     fd = _first_decl(g)                                   # g[fd] = first decl value
-    return block + g[:fd - 4] + bytes([(g[fd] + 44) % 256]) + g[fd + 1:]
+    xmark = (200 - h - 35 * (ny - 1)) % 256               # standard x-marker (was '+44')
+    return block + g[:fd - 4] + bytes([xmark]) + g[fd + 1:]
 
 
 def gen_seam_x0_low(n_real, ny=2, h=1, ly0=10, lz0=10):
@@ -1354,6 +1389,8 @@ def gen_seam_x0_low(n_real, ny=2, h=1, ly0=10, lz0=10):
     assumed from the bw band -- only 2 CV points probed."""
     lx0 = 32 - n_real
     g = gen_heightmap_unified([[h] * ny] * (n_real + 1), lx0=lx0, ly0=ly0, lz0=lz0)
+    if h >= 2:
+        g = _seam_x0_interior_fillers(g, ny, h, far_edge='first')
     CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256
     if CV <= 160:
         g = bytearray(g)

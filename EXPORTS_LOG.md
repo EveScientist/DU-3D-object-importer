@@ -77,6 +77,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3038 | Build AE — y=0 straddle plate, 2 cols × 4 rows (2/side) × 1 tall, 8 vox | X∈{10.5,11.5}, Y∈{−1.5,−0.5,+0.5,+1.5}, Z=10.5 | (8,8,8)+(8,7,8) | B2 y=0 SOLVED + UNIFIED SEAM PRINCIPLE: LOW = plain plate @ly0=30 byte-exact first try. HIGH = decl region from (rows+2)-plate @ly0=−2 (declares extra overlap row; lead=CV(−2)=119, extra 33/col) + FG region from (rows+1)-plate @ly0=−1, tail −2 — SAME principle as z=0 clean form (decls declare one extra overlap unit). Also REINTERPRETED x=0's "+44": 164 = standard x-marker value — x=0 HIGH decls are those of the (cols+2)-plate @lx0=−2. gen_seam_y0_high/low rewritten; all byte-exact. |
 
+| 3040 | Build AF — x=0 straddle slab, 4 cols × 2 rows × 2 tall, 16 vox | X∈{−1.5,−0.5,+0.5,+1.5}, Y∈{10.5,11.5}, Z∈{10.5,11.5} | (8,8,8)+(7,8,8) | h=2: PREDICTION CONFIRMED — first-decl 163 = x-marker formula (200−h−35(ny−1)); ghost-block h−1 fields track h, block marker 33→32 (33−(h−1), h=3 would distinguish const −1). NEW: h≥2 interior-filler transform — every FG cluster EXCEPT the far-edge one takes z=0-degenerate form (first ny−1 rows → run 0 + (h−2,0) filler); HIGH far edge = last cluster, LOW = first (HIGH's c0 counts interior because decls claim an extra ghost cluster). +24B = 3 fillers ×8. Coded _seam_x0_interior_fillers; all byte-exact incl regressions. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 
