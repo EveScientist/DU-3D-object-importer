@@ -65,6 +65,8 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 
 | 3024 | Build Z — z=0 straddle, 2×2, up 2 all, down 4 X=10.5 / down 2 X=11.5 (extra=2), 20 vox | X∈{10.5,11.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all4; Z=−2.5/−3.5 only X=10.5 pair | BOTH hypotheses wrong — ROLES FLIPPED vs 3022: HIGH = byte-exact plain uniform d3; LOW carries the variation (first varying LOW ever). Decoded + coded gen_seam_z_low_varying([[5,5],[3,3]]) byte-exact: interior k0 run→diff, k≥1 value→33−diff, final opener +diff, col-c x-marker decl +diff, nudges split (first-decl/fg0−dep(col0), preval+dep(colLast)). All 8 uniform reductions == gen_seam_z_low exactly. REPRESENTATION RULE: extra=1 → folds into HIGH (3022); extra≥2 → varying LOW + min-uniform HIGH (3024). |
 
+| 3026 | Build AA — z=0 straddle, 3×2, up 2 all; down 2/3/4 across X (extras 0/1/2), 30 vox | X∈{10.5,11.5,12.5}, Y∈{10.5,11.5}; Z=+1.5/+0.5/−0.5/−1.5 all6; Z=−2.5 X∈{11.5,12.5} pairs; Z=−3.5 X=12.5 pair | CHOICE IS WHOLE-CHUNK: HIGH byte-exact plain uniform-min d3; LOW carries ALL variation incl the extra=1 col ([[3,3],[4,4],[5,5]]). Also pinned SIGNED step rules (build was ascending, 3024 descending): x-marker decl += s(c) signed; interior opener += min(0,s); final opener += max(0,s(last)). gen_seam_z_low_varying byte-exact 3024+3026+8 uniform reductions. |
+
 ## Pending (spec'd, awaiting export number)
 - (none)
 

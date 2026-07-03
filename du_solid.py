@@ -1170,13 +1170,17 @@ def gen_seam_z_low_varying(Ldepth, lx0=10, ly0=10, lz0=31):
     """-Z chunk of a z=0 seam with PER-COLUMN depth. Ldepth[xi][yi] = that column's
     depth (= #real -Z layers + 1 boundary ghost). Generalizes gen_seam_z_low's uniform
     in-place transform, everything keyed by diff = |Ldepth[c-1][0] - Ldepth[c][0]|:
-    interior first group run -> diff (uniform: 0); later groups value -> 33-diff
-    (uniform: 33); final cluster opener += diff; col c x-marker decl += diff; nudges
-    split per column: first-decl & fg0 opener -= dep(col0), preval += dep(col_last)
+    interior first group run -> |diff| (uniform: 0); later groups value -> 33-|diff|
+    (uniform: 33). SIGNED step s(c) = Ldepth[c-1][0] - Ldepth[c][0] drives the rest:
+    col c x-marker decl += s(c); interior opener c += min(0, s(c)) (negative part);
+    final opener += max(0, s(nx-1)) (positive part of its adjacent step). Nudges split
+    per column: first-decl & fg0 opener -= dep(col0), preval += dep(col_last)
     (dep = depth-2). Reduces exactly to gen_seam_z_low for uniform input. Byte-exact
-    vs 3024 LOW ([[5,5],[3,3]]). NOTE representation choice (3022 vs 3024): DU folds a
-    1-layer below-min extra into the HIGH chunk (LOW stays min-uniform); only a >=2
-    layer extra produces this varying LOW. DEFERRED: ny>2 varying-y LOW, mixed extras."""
+    vs 3024 ([[5,5],[3,3]] descending) + 3026 ([[3,3],[4,4],[5,5]] ascending, nx=3).
+    REPRESENTATION choice is WHOLE-CHUNK (3026): if ANY column extra >= 2, LOW carries
+    ALL variation (incl extra=1 cols) and HIGH is plain uniform-min; if max extra == 1
+    it folds into HIGH instead (3022) and LOW is min-uniform. DEFERRED: mixed
+    ascend+descend steps (final-opener attribution), ny>2 varying-y LOW."""
     nx = len(Ldepth); ny = len(Ldepth[0])
     g = bytearray(gen_heightmap_unified(Ldepth, lx0=lx0, ly0=ly0, lz0=lz0, cz_neg=True))
     gs = _flat_groups(g); per = 1 + ny
@@ -1190,19 +1194,23 @@ def gen_seam_z_low_varying(Ldepth, lx0=10, ly0=10, lz0=31):
             else:
                 g[gi] = (33 - diff) % 256                 # value -> 33-diff (uniform: 33)
                 if k < ny - 1: g[gi+2] = 0; g[gi+6] = 0   # middle rows: run->0
-    if nx >= 2:                                           # final cluster opener += diff
-        dlast = abs(Ldepth[nx-2][0] - Ldepth[nx-1][0])
+    for c in range(1, nx):                                # interior opener: negative part
+        s = Ldepth[c-1][0] - Ldepth[c][0]
+        go = gs[c * per]
+        g[go] = (g[go] + min(0, s)) % 256
+    if nx >= 2:                                           # final opener: positive part
+        s = Ldepth[nx-2][0] - Ldepth[nx-1][0]
         go = gs[nx * per]
-        g[go] = (g[go] + dlast) % 256
+        g[go] = (g[go] + max(0, s)) % 256
     decls = []; i = 0                                     # decl positions [val,1,2,d,0]
     while i < len(g) - 5:
         if g[i+1] == 1 and g[i+2] == 2 and g[i+4] == 0 and g[i] not in (0, 255):
             decls.append(i); i += 5
         else: i += 1
-    for c in range(1, nx):                                # col c x-marker decl += diff
-        diff = abs(Ldepth[c-1][0] - Ldepth[c][0])
+    for c in range(1, nx):                                # col c x-marker decl += signed step
+        s = Ldepth[c-1][0] - Ldepth[c][0]
         di = decls[c * ny]
-        g[di] = (g[di] + diff) % 256
+        g[di] = (g[di] + s) % 256
     dep0 = Ldepth[0][0] - 2; depL = Ldepth[-1][0] - 2     # per-column nudges
     f0 = _fg0(g)
     g[decls[0]] = (g[decls[0]] - dep0) % 256
