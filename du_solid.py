@@ -1504,16 +1504,18 @@ def _last_decl_end(s):
 #     (h-2 slot position is SIDE-DEPENDENT -- pinned by 3050 h3; at h2 all
 #     s-slots are 0 and 3048 couldn't distinguish. Memory's "final byte=h-2"
 #     was the wrong slot.)
-#   * TRI trigger: the chunk's OWN boundary column pair steps
-#     (h(±0.5) != h(±1.5)). Fits all 8 chunks: 3048/3050 both sides step ->
-#     both TRI; 3052 (step AT seam) / 3054 (step 2 out) -> none. AMBIGUOUS
-#     vs "either side's step triggers both chunks" -- every ref stepped
-#     symmetrically; needs a one-sided-step build (e.g. 1,1|2,1).
+#   * TRI trigger: the OPPOSITE side's boundary column pair steps
+#     (opp[0] != opp[1]) -- the transition geometry lives in the chunk ACROSS
+#     the seam from the step. Pinned by one-sided build 3056 (1,1|2,1): HIGH
+#     (own pair steps) came back completely PLAIN while LOW (own side flat)
+#     carried the TRI ghost cluster; the own-pair hypothesis predicted the
+#     exact inverse. 3048/3050 (both sides step -> both TRI) and 3052/3054
+#     (no step 1-out -> none) fit too.
 #   * decl-third (3042 h3 flip): 3050 has h3 cols yet ALL decl thirds stay 2
 #     -> the flip keys on the BOUNDARY WINDOW's min height (own pair + opp
 #     pair), not the max. max(2, wmin) fits 3040/3042/3050; provisional.
-# UNVALIDATED: ny > 2 (middle-row +42 assignment), one-sided steps (trigger
-# ambiguity + dz sign for steps UP toward the seam), h >= 4, n_real >= 4.
+# UNVALIDATED: ny > 2 (middle-row +42 assignment), dz sign for steps UP
+# toward the seam (valley at the boundary), h >= 4, n_real >= 4.
 def _x0_tri16(val, run, dz, hc, side):
     """16-byte three-vertex transition group. h-2 slot: s2 for HIGH, s1 for LOW."""
     T = bytes([0x7e, 0x7e, 0x7e]); T1 = bytes([0x7e, 0x7e, (0x7e + dz) % 256])
@@ -1589,13 +1591,13 @@ def gen_seam_x0_high_varying(cols, opp, ny=2, ly0=10, lz0=10):
     """+X chunk (cx=8) of an x=0 seam with per-column heights. cols = own real
     column heights boundary-first [h(+0.5), h(+1.5), ...]; opp = the -X side's,
     boundary-first [h(-0.5), h(-1.5), ...] (only the first two are used: ghost
-    col height + head parameter hB). Byte-exact vs 3048/3050/3052/3054 HIGH;
-    reduces to gen_seam_x0_high for uniform input."""
+    col height + head parameter hB). Byte-exact vs 3048/3050/3052/3054/3056
+    HIGH; reduces to gen_seam_x0_high for uniform input."""
     assert len(cols) >= 2 and len(opp) >= 2
     ghost, hB = opp[0], opp[1]
     plate = [ghost] + list(cols)
     g = gen_heightmap_unified([[h] * ny for h in plate], lx0=-1, ly0=ly0, lz0=lz0)
-    g = _x0_rebuild_fg(g, plate, ny, 'high', tri=cols[0] != cols[1])
+    g = _x0_rebuild_fg(g, plate, ny, 'high', tri=opp[0] != opp[1])
     wmin = min(cols[0], cols[1], opp[0], opp[1])      # decl-third window (provisional)
     d2 = max(2, wmin)
     cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
@@ -1611,12 +1613,13 @@ def gen_seam_x0_low_varying(cols, opp, ny=2, ly0=10, lz0=10):
     column heights boundary-first [h(-0.5), h(-1.5), ...]; opp = the +X side's,
     boundary-first (opp[0] = ghost col height). Plain varying plate at
     lx0 = 32-n_real + FG rewrite + the uniform CV<=160 band shift. Byte-exact
-    vs 3048/3050/3052/3054 LOW; reduces to gen_seam_x0_low for uniform input."""
+    vs 3048/3050/3052/3054/3056 LOW; reduces to gen_seam_x0_low for uniform
+    input."""
     assert len(cols) >= 2 and len(opp) >= 2
     n_real = len(cols); lx0 = 32 - n_real
     plate = list(reversed(cols)) + [opp[0]]
     g = gen_heightmap_unified([[h] * ny for h in plate], lx0=lx0, ly0=ly0, lz0=lz0)
-    g = _x0_rebuild_fg(g, plate, ny, 'low', tri=cols[0] != cols[1])
+    g = _x0_rebuild_fg(g, plate, ny, 'low', tri=opp[0] != opp[1])
     wmin = min(cols[0], cols[1], opp[0], opp[1])
     g = _seam_x0_decl_third(g, wmin)
     CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256

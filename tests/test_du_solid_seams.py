@@ -166,7 +166,8 @@ for _num, _hc, _ho, _lc, _lo in [
         (3048, [2, 1], [2, 1], [2, 1], [2, 1]),        # sym hump, step 1 out
         (3050, [3, 1], [3, 1], [3, 1], [3, 1]),        # sym hump, step of 2
         (3052, [1, 1], [2, 2], [2, 2], [1, 1]),        # step AT boundary
-        (3054, [1, 1, 1], [1, 1], [1, 1, 2], [1, 1, 1])]:  # step 2 cols out
+        (3054, [1, 1, 1], [1, 1], [1, 1, 2], [1, 1, 1]),   # step 2 cols out
+        (3056, [2, 1], [1, 1], [1, 1], [2, 1])]:           # ONE-SIDED step 1 out
     def _t(num=_num, hc=_hc, ho=_ho, lc=_lc, lo=_lo):
         c = chunks(num)
         assert D.gen_seam_x0_high_varying(hc, ho) == c[HIGH_X], "HIGH"
