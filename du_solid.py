@@ -312,8 +312,8 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         return s[:t]
     # floor-step & gap-shrinks (validated nx<=12, ny<=10):
     step = (2 * ((nx + 1) // 5) if ny == 1 else 2 * ((nx - 1) // 5)) - 2 * (ny >= 4) + 2 * (4 <= ny <= 6 and (nx >= 3 or (nx == 2 and ly0 >= 0))) + dstep  # nx floor-step (ny>=2: //5, pinned by flat nx5 2969=step0 + nx7 wave 2965=step2); ny>=4 corr -2 base, +2 back for ny=4..6 & (nx>=3 or nx==2 w/ ly0>=0); nx==2 neg-ly0 (y-seam) keeps -2; dstep=+2 down-ghost
-    xgap = bytes([255, 0]) * (4 - (ny >= 7))             # decl x-gap: 8B(ny<=6)/6B(ny>=7)
-    clgap = bytes([255, 0]) * (4 - (ny >= 6))            # FG cluster gap: 8B(ny<=5)/6B(ny>=6)
+    xgap = bytes([255, 0]) * (4 - (ny >= 7))             # decl x-gap: 8B(ny<=6)/6B(ny>=7) (plain plate keeps 6B at ny=13 -- 3105 (8,8,8))
+    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32))  # FG cluster gap: 8B/6B/4B; same band shape (ny=13 pinned, ny>=33 stays 6B)
     s = bytearray(bytes([0, 255]) * declpair0)
     for xi in range(nx):
         if xi > 0: s += xgap
@@ -375,7 +375,7 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         else:
             for j in range(ny): s += grp(33 - rInc(ec, j), rDec(ec, j))
         if k < nx - 1: s += clgap
-    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn
+    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn
     return bytes(pad_to(s, L))
 
 
