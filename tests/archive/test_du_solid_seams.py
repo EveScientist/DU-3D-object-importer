@@ -232,6 +232,13 @@ def _(num=3064):
     assert D.gen_seam_y0_low_varying([1, 2], [1, 2]) == c[LOW_Y], "LOW"
 
 
+@case("y0_varying_3066_one_sided_step")
+def _(num=3066):
+    c = chunks(num)
+    assert D.gen_seam_y0_high_varying([2, 1], [1, 1]) == c[HIGH_Y], "HIGH"
+    assert D.gen_seam_y0_low_varying([1, 1], [2, 1]) == c[LOW_Y], "LOW"
+
+
 @case("y0_varying_reduces_to_uniform")
 def _():
     for nr, h in [(2, 1), (2, 2), (2, 3)]:

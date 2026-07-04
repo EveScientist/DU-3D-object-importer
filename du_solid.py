@@ -1691,8 +1691,10 @@ def gen_seam_x0_low_varying(cols, opp, ny=2, ly0=10, lz0=10):
 # pins the SEAM CHAIN RESET (see _y0_rebuild_fg): row (val, run) rebuilt
 # over own rows only + standalone ghost row group + HIGH opener run
 # max(hB, ghost); no transition geometry (directional trigger transposes).
-# VALIDATED at nx=2, h<=2, ny=2 rows/side (hump 3062 + valley 3064); s-slot
-# at h>=3 assumed x=0-analogous (unprobed); no decl-third flip (x=0-specific
+# ONE-SIDED STEP 3066 confirms the trigger side transposes (HIGH plain, LOW
+# TRI) and pins PAIRWISE row runs (see _y0_rebuild_fg). VALIDATED at nx=2,
+# h<=2, ny=2 rows/side (hump 3062 + valley 3064 + one-sided 3066); s-slot at
+# h>=3 assumed x=0-analogous (unprobed); no decl-third flip (x=0-specific
 # per 3046); LOW CV<=160 band unprobed.
 def _y0_rebuild_fg(g, prof, nx, side, tri, hB=None):
     """Rewrite the FG of plain varying y-plate g (y-profile `prof` incl ghost
@@ -1708,19 +1710,23 @@ def _y0_rebuild_fg(g, prof, nx, side, tri, hB=None):
     ny = len(prof)
     f0, clusters, gaps, trail_at = _parse_fg_clusters(g)
     assert len(clusters) == nx + 1, (len(clusters), nx)
-    # per-group (val, run) specs; None val = keep baseline opener value
+    # per-group (val, run) specs; None val = keep baseline opener value.
+    # Row runs are PAIRWISE max(own, next group) -- 3066 (one-sided step)
+    # discriminates this from the plain plate's bwd-running-max, which 3064's
+    # profiles couldn't; the ghost row participates as a normal neighbor.
+    runs = [max(prof[j], prof[j+1]) if j < ny - 1 else prof[j] for j in range(ny)]
     if side == 'high':
         ghost, own = prof[0], prof[1:]
         m = max(hB, ghost)
-        specs = [(None, m), ((33 - m) % 256, ghost)]
+        specs = [(None, m), ((33 - m) % 256, runs[0])]
         for i in range(len(own)):
-            specs.append(((33 - max(own[:i+1])) % 256, max(own[i:])))
+            specs.append(((33 - max(own[:i+1])) % 256, runs[i + 1]))
     else:
         own, ghost = prof[:-1], prof[-1]
         specs = [(None, None)]                        # opener untouched
         for i in range(len(own)):
-            specs.append(((33 - max(own[:i+1])) % 256, max(own[i:])))
-        specs.append(((33 - ghost) % 256, ghost))
+            specs.append(((33 - max(own[:i+1])) % 256, runs[i]))
+        specs.append(((33 - ghost) % 256, runs[ny - 1]))
     fg = bytearray()
     for ci, cl in enumerate(clusters):
         assert len(cl) == ny + 1, (ci, len(cl))
