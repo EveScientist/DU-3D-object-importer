@@ -98,7 +98,14 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 | 3062 | Build AQ — y=0 hump 1,2|2,1 (2 cols × 4 rows straddling y=0), 12 vox | Z=10.5: X∈{10.5,11.5} × Y∈{−1.5,−0.5,+0.5,+1.5}; Z=11.5: X∈{10.5,11.5} × Y=±0.5 | (8,8,8)+(8,7,8) | y=0 varying = TRANSPOSE of x=0 rules: seam-adjacent element per x-cluster = OPENER (HIGH) / GHOST ROW (LOW); TRI dz +14 at x-EDGE clusters, +42 at x-interior (HIGH openers); LOW ghost row +14 at edges, filler form interior; T1 offset stays in the Z slot (displacement is vertical — not the y slot). HIGH decls = varying (rows+2)-plate @ly0=−2 with [hB, ghost]+rows (hB rule transposes; vals 119/94 = −35 shift). Fillers confined to x-interior clusters; HIGH rows two-sided neighbor rule, LOW rows ONE-SIDED (+y toward seam — 3062 LOW row1 rejects two-sided; x/y asymmetry). gen_seam_y0_high/low_varying coded; byte-exact both chunks + uniform reductions h1/h2/h3. Suite 42/42. |
 | 3064 | Build AR — y=0 VALLEY 2,1|1,2 (2 cols × 4 rows), 12 vox | Z=10.5: X∈{10.5,11.5} × Y∈{−1.5,−0.5,+0.5,+1.5}; Z=11.5: X∈{10.5,11.5} × Y=±1.5 | (8,8,8)+(8,7,8) | SEAM CHAIN RESET discovered: plain y-plates encode rows as val=33−fwd-running-max / run=bwd-running-max over the profile, but seam chunks reset the chain at the boundary — own rows chain over OWN rows only; ghost row group standalone: HIGH (33−max(hB,ghost), run=ghost) + opener run=max(hB,ghost) (across-boundary-pair rule transposed), LOW (33−ghost, run=ghost) (outer col ignored — LOW asymmetry transposed). Directional TRI trigger transposes (valley = zero transition geometry ✓). Hump 3062 had masked the reset (chains coincided). _y0_rebuild_fg rebuilt spec-based; both chunks byte-exact; 3062+reductions unaffected. Suite 43/43. |
 | 3066 | Build AS — y=0 ONE-SIDED step (heights 1,1|2,1), 2 cols, 10 vox | Z=10.5: X∈{10.5,11.5} × Y∈{−1.5,−0.5,+0.5,+1.5}; Z=11.5: X∈{10.5,11.5} × Y=+0.5 | (8,8,8)+(8,7,8) | TRIGGER SIDE TRANSPOSES ✓ (HIGH plain, LOW carries TRI ghost rows — exactly as predicted from x=0's 3056). Residual 6 bytes/chunk pinned PAIRWISE ROW RUNS: seam-chunk row runs = max(own, next group) incl the ghost as neighbor — NOT the plain plate's bwd-running-max (3064's profiles couldn't distinguish; 3066's h1-row-before-h2-ghost does: run 2 where bwdmax-of-own gives 1; ghost row next = own row0 for HIGH). Fixed in _y0_rebuild_fg; both chunks byte-exact; all priors unaffected. Suite 44/44. y=0 VARYING = CLOSED to x=0 standard. |
-- (none)
+
+## Pending (spec'd, awaiting export number)
+- **Build AT — y=0+z=0 SURFACE corner** (yz analog of 2945): 12 vox, hcCarbon —
+  X∈{10.5,11.5,12.5} × Y∈{−0.5,+0.5} × Z∈{−0.5,+0.5}. Expect 4 chunks
+  (8,8,8)/(8,7,8)/(8,8,7)/(8,7,7). Prediction harness READY:
+  `python3 tests/predict_yz_corner_0704.py <num>` — tests the transposed xz-corner
+  rules (±corner-jitter, ±all-rows fwd-ghost y-analog) per chunk and prints
+  byte-exact hits or first-diff context.
 
 ## Generated import tests
 - **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
