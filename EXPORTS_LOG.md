@@ -108,6 +108,14 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 - (none)
 
 ## Generated import tests
+- **tests/mesh_wave_import_0704_1434.blueprint** (2026-07-04) — FIRST MESH-DRIVEN import test:
+  cosine half-pipe valley z(x)=0.75+0.25·cos(πx/2) over a 4×1 patch, generated end-to-end by the
+  NEW du_mesh solver (mesh → corner z-sample → blocky H + per-corner vertex offsets →
+  gen_surface_displaced). Corner offsets 0/−21/−42/−21/0 (smooth half-voxel dip). Envelope+mc 514
+  from donor 2700 (same all-1 blocky H; mc displacement-invariant). Round-trip verified. Solver
+  offline-validated: reproduces gen_linear_ramp (2700), the diagonal tilt, and plain flat plates
+  byte-exactly from synthetic meshes. EXPECTED: 4-vox strip at the 2700 position whose top is a
+  smooth cosine valley — full height at the ends, half-voxel dip center, no steps. AWAITING DEPLOY.
 - **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
   across x=0 (LOW [2,1] / HIGH [2,1,1] boundary-first; TRI transition clusters BOTH chunks —
   first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying
