@@ -249,6 +249,15 @@ def _():
             D.gen_seam_y0_low(nr, h=h), f"LOW n{nr} h{h}"
 
 
+# ── x=0+z=0 surface corner (archive refs; origin-crossing so positions known)
+for _num, _ny in [(2945, 3), (2947, 4)]:
+    def _t(num=_num, ny=_ny):
+        c = chunks(num)
+        for key, scan in D.gen_corner_xz(ny).items():
+            assert scan == c[key], f"{key}"
+    CASES.append((f"xz_corner_{_num}_ny{_ny}", _t))
+
+
 def main():
     passed = failed = 0
     for name, fn in CASES:

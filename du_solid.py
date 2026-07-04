@@ -1100,7 +1100,7 @@ def _seam_z_value_nudge(g, gs, depth, sign=+1):
 # (extra (0,0) filler, ghost val 31, h-1=depth-1); depth>=3 uses decls@H=depth+1 +
 # FG@H=depth + constant first-decl-1/preval+1. (Archive 2906/2935/2937/2910 are at an
 # UNKNOWN base position -> not byte oracles; see EXPORTS_LOG.md.)
-def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
+def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None, x_fwd_ghost=False):
     """+Z chunk of a z=0 seam. depth = (#real +Z layers) + 1 ghost. opp_depth = the
     LOW side's depth (= #real -Z layers + 1); defaults to depth (symmetric straddle).
     The HIGH form is COUPLED to the LOW side's real-layer count (low_real = opp_depth-1):
@@ -1109,9 +1109,13 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
       - low_real >= 2: CLEAN form. FG@H=depth with mirror interior transform (ghost rows
         -> (33,run0), last stays real); decls from H=depth+1 (declares the overlap cell
         -> h-1=depth); constant first-decl -1 / preval +1.
+    x_fwd_ghost: xz-corner rule (A) for the -x (cx=7) chunk -- its forward ghost
+    column makes the LAST cluster special too (special range 1..nx instead of
+    1..nx-1). Validated in the degenerate branch only (2945/2947, depth=2).
     Byte-exact vs 2986(d2)/2983(d3)/2988(d4) symmetric + 2990(3x3) + 2992(3up/1down asym)."""
     if opp_depth is None:
         opp_depth = depth
+    sp_hi = nx if x_fwd_ghost else nx - 1
     if opp_depth <= 2:                                    # LOW side <=1 real layer -> degenerate
         inner = depth - 2
         g = gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1)
@@ -1122,7 +1126,7 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
         for c in range(nx + 1):
             ov, orr = gvals[idx]; idx += 1; fg += _zgrp(ov, orr)
             content = gvals[idx:idx + ny]; idx += ny
-            if 1 <= c <= nx - 1:                          # interior: (val,0)+(inner,0) filler
+            if 1 <= c <= sp_hi:                           # interior: (val,0)+(inner,0) filler
                 for k in range(ny - 1):
                     fg += _zgrp(content[k][0], 0) + _zgrp(inner, 0)
                 fg += _zgrp(*content[ny - 1])
@@ -1134,7 +1138,7 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
     # (declares the overlap cell -> h-1 = depth); constant first-decl -1 / preval +1.
     gA = bytearray(gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=-1))
     gs = _flat_groups(gA); per = 1 + ny
-    for c in range(1, nx):                                # interior columns
+    for c in range(1, sp_hi + 1):                         # interior (+ last if fwd-ghost) columns
         b = c * per
         for k in range(ny):
             gi = gs[b + 1 + k]
@@ -1149,14 +1153,16 @@ def gen_seam_z_high(nx, ny, lx0=10, ly0=10, depth=2, opp_depth=None):
     return _seam_nx_step(bytes(out), nx)
 
 
-def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31):
+def gen_seam_z_low(nx, ny, lx0=10, ly0=10, depth=2, lz0=31, x_fwd_ghost=False):
     """-Z chunk of a z=0 seam (negative octant, cz_neg=True; lz0 = its own local z,
     31 for the Z=-0.5 layer). depth = (#real -Z layers) + 1 ghost. Interior x-columns
     do an IN-PLACE transform: first group run->0 (value kept); remaining groups value
-    ->33 (up-facing ghost) with runs->0 except the last. Simpler than the HIGH side."""
+    ->33 (up-facing ghost) with runs->0 except the last. Simpler than the HIGH side.
+    x_fwd_ghost: xz-corner rule (A) -- the -x chunk's forward ghost column makes
+    the LAST cluster special too (see gen_seam_z_high; pinned by 2945/2947)."""
     g = bytearray(gen_heightmap_unified([[depth] * ny] * nx, lx0=lx0, ly0=ly0, lz0=lz0, cz_neg=True))
     gs = _flat_groups(g); per = 1 + ny
-    for c in range(1, nx):                                # interior columns
+    for c in range(1, (nx + 1) if x_fwd_ghost else nx):   # interior (+ last if fwd-ghost)
         b = c * per
         for k in range(ny):
             gi = gs[b + 1 + k]
@@ -1790,6 +1796,44 @@ def gen_seam_y0_low_varying(rows, opp, nx=2, lx0=10, lz0=10):
     prof = list(reversed(rows)) + [opp[0]]
     g = gen_heightmap_unified([prof] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
     return _y0_rebuild_fg(g, prof, nx, 'low', tri=opp[0] > opp[1])
+
+
+# ── x=0 + z=0 SURFACE CORNER (B3) ────────────────────────────────────────────
+# A solid slab straddling BOTH x=0 and z=0 -> 4 chunks. Derived 2026-07-02
+# (refs 2945 2x3x2 / 2947 2x4x2, both depth 2); recipes re-verified byte-exact
+# under the current (rewritten) z-seam code 2026-07-04. TWO composition rules:
+#  (A) special-cluster SPREAD: the -x (cx=7) chunks' forward ghost column makes
+#      the z-seam's LAST cluster special too (x_fwd_ghost=True -> range 1..nx);
+#      +x (cx=8) chunks keep interior-only (1..nx-1).
+#  (B) corner jitter (-4): drop one pad pair before the preval + one trailing
+#      pair. Applied to +x+z, +x-z and -x+z, NOT to the double-negative -x-z
+#      octant. (This jitter is CORNER-ONLY: plain x=0 seams use the rewritten
+#      head/CV-band transforms in gen_seam_x0_*.)
+def _x0_corner_jitter(g):
+    """Octant-edge jitter for xz-corner chunks: drop one 00ff pad pair before
+    the preval (pre/fg0 -2) and one trailing pair (L -4 total)."""
+    g = bytearray(g); f0 = _fg0(g); pv = None
+    for i in range(f0 - 2, 0, -2):
+        if g[i+1] == 0 and g[i] not in (0, 255) and g[i] != 1:
+            pv = i; break
+    del g[pv-2:pv]; del g[-2:]
+    return bytes(g)
+
+
+def gen_corner_xz(ny, nx=2, depth=2, ly0=10):
+    """All 4 chunks of an x=0+z=0 surface corner as {(cx,cy,cz): scan}. nx =
+    plate width per chunk incl the x-ghost col (nx-1 real cols/side); depth =
+    (#real z layers)+1 ghost per side. Byte-exact vs 2945 (ny=3) + 2947 (ny=4).
+    VALIDATED at nx=2, depth=2 (degenerate z-form) only -- deeper/wider corners
+    exercise the clean z-form + x_fwd_ghost combination, unprobed."""
+    lo = 33 - nx                                          # -x side plate origin
+    j = _x0_corner_jitter
+    return {
+        (8, 8, 8): j(gen_seam_z_high(nx, ny, lx0=-1, ly0=ly0, depth=depth)),
+        (8, 8, 7): j(gen_seam_z_low(nx, ny, lx0=-1, ly0=ly0, depth=depth)),
+        (7, 8, 8): j(gen_seam_z_high(nx, ny, lx0=lo, ly0=ly0, depth=depth, x_fwd_ghost=True)),
+        (7, 8, 7): gen_seam_z_low(nx, ny, lx0=lo, ly0=ly0, depth=depth, x_fwd_ghost=True),
+    }
 
 
 def gen_corner_hh(Rx, Ry, lz0=10, h=1, verts=None):
