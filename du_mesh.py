@@ -213,6 +213,49 @@ def gen_y0_from_mesh(obj_path_or_geom, n_low=2, n_high=2, nx=2, xoff=0.0,
             (8, 7, 8): D.apply_seam_displacement(gl, vlist=build_vlist(lprof, -n_low))}
 
 
+def gen_z0_from_mesh(obj_path_or_geom, nx, ny, floor, xoff=0.0, yoff=0.0,
+                     lx0=10, ly0=10):
+    """Mesh -> BLOCKY z=0 crossing chunk pair {(8,8,8), (8,8,7)}: terrain
+    whose solid runs from a floor below z=0 up to the mesh's top surface.
+    floor < 0 (integer voxel plane). Per-column HIGH depths = surface voxels
+    above 0 (+1 boundary ghost) from cell-center sampling; LOW depths =
+    |floor| (+1). Encodes via the z0 representation chooser (pinned 3022/
+    3024/3026): per-column LOW extras = low_real - min(low_real); max extra
+    0 -> LOW uniform; 1 -> variation FOLDS INTO HIGH (+extra on its depth);
+    >=2 -> LOW carries ALL variation, HIGH plain at uniform-min. NOTE: only
+    vertical BLOCKY structure here -- z0 displacement carriers await a
+    probe build (Build AW). Flat floor => LOW uniform (the common case)."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+    assert floor < 0
+    Hdep = []                                     # HIGH depths [x][y]
+    for i in range(nx):
+        col = []
+        for j in range(ny):
+            zc = top_z(verts, faces, xoff + i + 0.5, yoff + j + 0.5)
+            assert zc is not None, f"cell ({i},{j}) not covered"
+            col.append(max(1, round(zc)) + 1)
+        Hdep.append(col)
+    low_real = [[-floor] * ny for _ in range(nx)]  # flat floor (per-col ready)
+    minlow = min(min(c) for c in low_real)
+    extras = [[c - minlow for c in col] for col in low_real]
+    mx = max(max(c) for c in extras)
+    if mx == 0:
+        high = D.gen_seam_z_high_varying(Hdep, lx0=lx0, ly0=ly0)
+        low = D.gen_seam_z_low(nx, ny, lx0=lx0, ly0=ly0, depth=minlow + 1)
+    elif mx == 1:
+        Hfold = [[Hdep[i][j] + extras[i][j] for j in range(ny)] for i in range(nx)]
+        high = D.gen_seam_z_high_varying(Hfold, lx0=lx0, ly0=ly0)
+        low = D.gen_seam_z_low(nx, ny, lx0=lx0, ly0=ly0, depth=minlow + 1)
+    else:
+        high = D.gen_seam_z_high_varying(Hdep, lx0=lx0, ly0=ly0)
+        low = D.gen_seam_z_low_varying([[lr + 1 for lr in col] for col in low_real],
+                                       lx0=lx0, ly0=ly0)
+    return {(8, 8, 8): high, (8, 8, 7): low}
+
+
 # ── OBJ -> blueprint driver (heightfield meshes, proven region types) ────────
 # Envelopes are never hand-rolled (import-test guidance): the driver picks a
 # donor export whose h3 chunk set matches the target region, keyed here.
@@ -341,7 +384,12 @@ def _selftest():
     scans = gen_y0_from_mesh(geom, 2, 2, nx=2, xoff=-10.0, yoff=2.0)
     assert scans[(8, 8, 8)] == D.gen_seam_y0_high_varying([1, 1], [1, 1]), "y0 flat HIGH"
     assert scans[(8, 7, 8)] == D.gen_seam_y0_low_varying([1, 1], [1, 1]), "y0 flat LOW"
-    print("du_mesh selftest: 7/7 OK")
+    # 8) z=0 crossing: step mesh == the 3004 family (depths [[3,3],[2,2]], low 3)
+    geom = plane_mesh(2, 2, lambda x, y: 2.0 if x < 1 else 1.0)
+    scans = gen_z0_from_mesh(geom, 2, 2, floor=-2)
+    assert scans[(8, 8, 8)] == D.gen_seam_z_high_varying([[3, 3], [2, 2]]), "z0 HIGH"
+    assert scans[(8, 8, 7)] == D.gen_seam_z_low(2, 2, depth=3), "z0 LOW"
+    print("du_mesh selftest: 8/8 OK")
 
 
 if __name__ == "__main__":
