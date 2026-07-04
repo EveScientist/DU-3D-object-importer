@@ -218,7 +218,9 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   y0-splice/x0-head recipes; flat-mesh reduction == gen_corner_xy blocky (selftest 10/10).
   Donor 3079, mcs 681/620/594/533. EXPECTED: ONE continuous plane, gently down toward +x,
   strongly down toward +y, deepest at (+2,+2); NO crack at x=0, y=0, or the corner. Any
-  discontinuity localizes the offending chunk. AWAITING DEPLOY.
+  discontinuity localizes the offending chunk.
+  **DEPLOYED AS EXPECTED 2026-07-04 — multi-region composition (4 octant chunks, 3 recipe
+  families, one continuous displaced plane) hardware-proven.**
 
 ## 3-plane surface corner (2949 revisited 2026-07-04)
 - **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
