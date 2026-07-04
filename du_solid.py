@@ -1909,6 +1909,68 @@ def gen_corner_yz(nx, depth=2, lx0=10):
     return out
 
 
+# ── SMOOTH DISPLACEMENT OVERLAY for seam chunks (END-GOAL arc) ───────────────
+# Pinned by 3081 (in-game smooth tool applied to the 3048 hump across x=0):
+# smoothing changes ONLY displacement slots -- cluster structure, values,
+# runs, decls and pads are byte-identical to the blocky seam encoding. Three
+# carriers, selected per group form:
+#   * 16B TRI groups: displacement goes in the T2 vertex slot; T1 keeps the
+#     blocky transition offset (+14/+42).
+#   * flat 8B groups with run>0: expand to the 12B two-vertex form
+#     [val,1,run, 7e,7e,7e, run-1, V1, 0,0] -- the +6 slot is run-1, which
+#     also fits the old single-chunk refs (run 1 -> 0).
+#   * (0,0) FILLER groups: in-place 8B displacement (slots +3..+5).
+#   * run-0 content rows stay NEUTRAL (7e).
+# In 3081 displacement is PER-CLUSTER uniform: bevel clusters (+-28,0,-40),
+# hump-top interior (0,0,-16), far/h1 clusters neutral. The VALUE function
+# (DU's smoothing vertex solve) is the remaining unknown of this arc.
+def apply_seam_displacement(g, tri_T2=None, cluster_disp=None):
+    """Overlay per-cluster smooth displacement onto a generated seam chunk.
+    tri_T2: {cluster_idx: (dx,dy,dz)} written into TRI groups' T2 slot;
+    cluster_disp: {cluster_idx: (dx,dy,dz)} applied to that cluster's flat
+    groups (run>0 -> 12B expansion, filler -> in-place, run-0 row -> neutral).
+    Byte-exact: 3081 == overlay(gen_seam_x0_*_varying([2,1],[2,1]))."""
+    enc = lambda d: (d + 126) % 256
+    out = bytearray(); i = 0; cl = -1; started = False
+    while i < len(g):
+        if i+1 < len(g) and g[i] == 255 and g[i+1] == 0:
+            n = 0
+            while i+1 < len(g) and g[i] == 255 and g[i+1] == 0:
+                out += g[i:i+2]; n += 1; i += 2
+            if started and n >= 3:
+                cl += 1
+            continue
+        is16 = (i+15 < len(g) and g[i+1] == 1 and g[i+3] == 0x7e and g[i+6] == 0
+                and g[i+7] == 0x7e and g[i+10] == 0 and g[i+15] == 0
+                and not (g[i+4] == 0x7e and g[i+5] == 0x7e and g[i+6] == g[i+2]
+                         and g[i+7] == 0))
+        is8 = (i+7 < len(g) and g[i+1] == 1 and g[i+3] == 0x7e and g[i+4] == 0x7e
+               and g[i+5] == 0x7e and g[i+7] == 0 and g[i+6] == g[i+2])
+        if is16:
+            if not started: started = True; cl = 0
+            grp = bytearray(g[i:i+16])
+            T2 = (tri_T2 or {}).get(cl)
+            if T2:
+                grp[11], grp[12], grp[13] = enc(T2[0]), enc(T2[1]), enc(T2[2])
+            out += grp; i += 16
+        elif is8:
+            if not started: started = True; cl = 0
+            V = (cluster_disp or {}).get(cl)
+            if V is None or (g[i+2] == 0 and g[i] != 0):
+                out += g[i:i+8]                   # untouched / neutral run-0 row
+            elif g[i+2] == 0:                     # (0,0) filler: in-place
+                grp = bytearray(g[i:i+8])
+                grp[3], grp[4], grp[5] = enc(V[0]), enc(V[1]), enc(V[2])
+                out += grp
+            else:                                 # run>0: 8B -> 12B two-vertex
+                out += bytes([g[i], 1, g[i+2], 0x7e, 0x7e, 0x7e, g[i+2] - 1,
+                              enc(V[0]), enc(V[1]), enc(V[2]), 0, 0])
+            i += 8
+        else:
+            out += g[i:i+1]; i += 1
+    return bytes(out)
+
+
 # ── x=0 + y=0 SURFACE CORNER (B3) ────────────────────────────────────────────
 # Derived 2026-07-04 from 3079 (4x4x1 slab straddling x=0 AND y=0, h=1).
 # The cleanest corner of the three:

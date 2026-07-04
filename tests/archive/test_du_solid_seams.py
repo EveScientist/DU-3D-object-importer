@@ -272,6 +272,21 @@ def _(num=3079):
         assert scan == c[key], f"{key}"
 
 
+@case("x0_smooth_overlay_3081")
+def _(num=3081):
+    c = chunks(num)
+    gh = D.apply_seam_displacement(
+        D.gen_seam_x0_high_varying([2, 1], [2, 1]),
+        tri_T2={0: (28, 0, -40)},
+        cluster_disp={1: (0, 0, -16), 2: (-28, 0, -40)})
+    gl = D.apply_seam_displacement(
+        D.gen_seam_x0_low_varying([2, 1], [2, 1]),
+        tri_T2={3: (-28, 0, -40)},
+        cluster_disp={1: (28, 0, -40), 2: (0, 0, -16), 3: (-28, 0, -40)})
+    assert gh == c[HIGH_X], "HIGH"
+    assert gl == c[LOW_X], "LOW"
+
+
 def main():
     passed = failed = 0
     for name, fn in CASES:
