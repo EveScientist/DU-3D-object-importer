@@ -5,7 +5,7 @@ byte-for-byte (coordinates for every reference build are in
 /home/du/EXPORTS_LOG.md). Consolidates the 2026-07-02/03 z=0 / x=0 / y=0
 seam derivations so future edits can't silently regress them.
 
-Run:  python3 tests/test_du_solid_seams.py
+Run:  python3 tests/archive/test_du_solid_seams.py
 """
 import base64
 import json
@@ -16,7 +16,10 @@ import lz4.block
 
 sys.path.insert(0, "/home/du")
 import du_solid as D
-from tests.test_h3_generator import find_export
+try:
+    from tests.archive.test_h3_generator import find_export
+except ImportError:                                   # pre-2026-07-04 layout
+    from tests.test_h3_generator import find_export
 
 _cache = {}
 
@@ -220,6 +223,13 @@ def _(num=3062):
     c = chunks(num)
     assert D.gen_seam_y0_high_varying([2, 1], [2, 1]) == c[HIGH_Y], "HIGH"
     assert D.gen_seam_y0_low_varying([2, 1], [2, 1]) == c[LOW_Y], "LOW"
+
+
+@case("y0_varying_3064_valley")
+def _(num=3064):
+    c = chunks(num)
+    assert D.gen_seam_y0_high_varying([1, 2], [1, 2]) == c[HIGH_Y], "HIGH"
+    assert D.gen_seam_y0_low_varying([1, 2], [1, 2]) == c[LOW_Y], "LOW"
 
 
 @case("y0_varying_reduces_to_uniform")

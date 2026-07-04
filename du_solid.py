@@ -123,7 +123,10 @@ def gen_interior_scan(W=33, H=33, sep=217, depth=32):
 if __name__ == "__main__":
     import sys, json, base64, lz4.block, struct
     sys.path.insert(0, "/home/du")
-    from tests.test_h3_generator import find_export
+    try:
+        from tests.archive.test_h3_generator import find_export
+    except ImportError:
+        from tests.test_h3_generator import find_export
     bp = json.load(open(find_export(2494)))
     byc = {(e['x']['$numberLong'], e['y']['$numberLong'], e['z']['$numberLong']): e
            for e in bp['VoxelData'] if e['h'] == 3}
@@ -1684,49 +1687,73 @@ def gen_seam_x0_low_varying(cols, opp, ny=2, ly0=10, lz0=10):
 # REJECTED there, an x=0/y=0 asymmetry). TRI trigger transposes directly:
 # opp[0] > opp[1] (neighbor descends away). HIGH decls = varying (rows+2)-
 # plate @ly0=-2 with profile [hB=h(-y1.5), ghost]+rows (the -35/ly0 shift in
-# 3062's decl vals 119/94 pins the hB rule transposing too). VALIDATED at
-# nx=2, h<=2, ny=2 rows/side; s-slot at h>=3 assumed x=0-analogous (unprobed);
-# no decl-third flip (x=0-specific per 3046); LOW CV<=160 band unprobed.
-def _y0_rebuild_fg(g, prof, nx, side, tri):
+# 3062's decl vals 119/94 pins the hB rule transposing too). VALLEY 3064
+# pins the SEAM CHAIN RESET (see _y0_rebuild_fg): row (val, run) rebuilt
+# over own rows only + standalone ghost row group + HIGH opener run
+# max(hB, ghost); no transition geometry (directional trigger transposes).
+# VALIDATED at nx=2, h<=2, ny=2 rows/side (hump 3062 + valley 3064); s-slot
+# at h>=3 assumed x=0-analogous (unprobed); no decl-third flip (x=0-specific
+# per 3046); LOW CV<=160 band unprobed.
+def _y0_rebuild_fg(g, prof, nx, side, tri, hB=None):
     """Rewrite the FG of plain varying y-plate g (y-profile `prof` incl ghost
-    row: first for side='high', last for side='low') into y=0 seam form."""
+    row: first for side='high', last for side='low') into y=0 seam form.
+    Row (val, run) are REBUILT with the seam chain reset (pinned by valley
+    3064; the hump's chains coincided with the plain plate's): plain y-plates
+    encode val = 33 - fwd-running-max, run = bwd-running-max over the profile,
+    but seam chunks run that chain over the OWN rows only. The ghost row group
+    is standalone: HIGH (33 - max(hB, ghost), run=ghost) with the opener run
+    raised to max(hB, ghost) (= x=0's across-boundary-pair rule transposed);
+    LOW (33 - ghost, run=ghost), outer neighbor ignored (= x=0 LOW asymmetry).
+    Opener values always keep the plate's own (position-dependent) bytes."""
     ny = len(prof)
     f0, clusters, gaps, trail_at = _parse_fg_clusters(g)
     assert len(clusters) == nx + 1, (len(clusters), nx)
+    # per-group (val, run) specs; None val = keep baseline opener value
+    if side == 'high':
+        ghost, own = prof[0], prof[1:]
+        m = max(hB, ghost)
+        specs = [(None, m), ((33 - m) % 256, ghost)]
+        for i in range(len(own)):
+            specs.append(((33 - max(own[:i+1])) % 256, max(own[i:])))
+    else:
+        own, ghost = prof[:-1], prof[-1]
+        specs = [(None, None)]                        # opener untouched
+        for i in range(len(own)):
+            specs.append(((33 - max(own[:i+1])) % 256, max(own[i:])))
+        specs.append(((33 - ghost) % 256, ghost))
     fg = bytearray()
     for ci, cl in enumerate(clusters):
         assert len(cl) == ny + 1, (ci, len(cl))
         edge = ci in (0, nx)
-        op = cl[0]
+        vals = [cl[0][0] if sv is None else sv for (sv, _), _ in zip(specs, cl)]
+        runs = [op_grp[2] if sr is None else sr
+                for (_, sr), op_grp in zip(specs, cl)]
         if side == 'high':
             if tri:
-                fg += _x0_tri16(op[0], op[2], 14 if edge else 42, prof[0], side)
+                fg += _x0_tri16(vals[0], runs[0], 14 if edge else 42, prof[0], side)
             elif not edge and prof[0] >= 2:
-                g2 = bytearray(op); g2[2] = 0; g2[6] = 0
-                fg += bytes(g2) + _zgrp(prof[0] - 2, 0)
+                fg += _zgrp(vals[0], 0) + _zgrp(prof[0] - 2, 0)
             else:
-                fg += op
-            for j, grp in enumerate(cl[1:]):
+                fg += _zgrp(vals[0], runs[0])
+            for j in range(ny):
                 h = prof[j]
                 prev_h = prof[j-1] if j > 0 else h
                 next_h = prof[j+1] if j < ny - 1 else h
                 if j < ny - 1 and not edge and h >= 2 and prev_h >= h and next_h >= h:
-                    g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
-                    fg += bytes(g2) + _zgrp(h - 2, 0)
+                    fg += _zgrp(vals[j+1], 0) + _zgrp(h - 2, 0)
                 else:
-                    fg += grp
+                    fg += _zgrp(vals[j+1], runs[j+1])
         else:
-            fg += op
-            for j, grp in enumerate(cl[1:]):
+            fg += _zgrp(vals[0], runs[0])
+            for j in range(ny):
                 h = prof[j]
                 next_h = prof[j+1] if j < ny - 1 else h
                 if j == ny - 1 and tri and edge:
-                    fg += _x0_tri16(grp[0], grp[2], 14, h, side)
+                    fg += _x0_tri16(vals[j+1], runs[j+1], 14, h, side)
                 elif not edge and h >= 2 and next_h >= h:
-                    g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
-                    fg += bytes(g2) + _zgrp(h - 2, 0)
+                    fg += _zgrp(vals[j+1], 0) + _zgrp(h - 2, 0)
                 else:
-                    fg += grp
+                    fg += _zgrp(vals[j+1], runs[j+1])
         if ci < nx:
             fg += bytes([255, 0]) * gaps[ci]
     return g[:f0] + bytes(fg) + g[trail_at:]
@@ -1743,7 +1770,7 @@ def gen_seam_y0_high_varying(rows, opp, nx=2, lx0=10, lz0=10):
     gB = gen_heightmap_unified([[hB] + prof] * nx, lx0=lx0, ly0=-2, lz0=lz0)
     gA = gen_heightmap_unified([prof] * nx, lx0=lx0, ly0=-1, lz0=lz0)
     fA = _fg0(gA)                                     # before rebuild: TRI breaks _fg0
-    gA = _y0_rebuild_fg(gA, prof, nx, 'high', tri=opp[0] > opp[1])
+    gA = _y0_rebuild_fg(gA, prof, nx, 'high', tri=opp[0] > opp[1], hB=hB)
     return (gB[:_fg0(gB)] + gA[fA:])[:-2]
 
 
