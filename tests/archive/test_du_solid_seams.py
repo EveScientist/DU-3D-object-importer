@@ -272,6 +272,15 @@ def _(num=3079):
         assert scan == c[key], f"{key}"
 
 
+@case("xyz_corner_2949_all_octants")
+def _(num=2949):
+    c = chunks(num)
+    scans = D.gen_corner_xyz()
+    assert len(scans) == 8
+    for key, scan in scans.items():
+        assert scan == c[key], f"{key}"
+
+
 @case("x0_smooth_overlay_3081")
 def _(num=3081):
     c = chunks(num)

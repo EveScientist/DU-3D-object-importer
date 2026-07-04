@@ -151,6 +151,17 @@ depth 2/3/4 sym + asym (HIGH couples to opp real-layer count); footprints nx=2�
 nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 step recurrence
 (well-motivated), varying per-column depth (relief across z=0 — the next frontier).
 
+## 3-plane surface corner (2949 revisited 2026-07-04)
+- **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
+  with the current toolkit (old attempt: 1/8). SIX octants = plain gen_seam_z_high/low bases at
+  lx0/ly0∈{−1,31} with x_fwd_ghost/y_fwd_ghost per side. (8,7,7) = base + last-opener +2 (yz
+  double-neg rule, WITHOUT 3077's layout shift — that shift is config-dependent). (7,7,7) = base
+  + fg0−2 pad drop + last-opener +2. (8,8,8) = plain plate @(−1,−1,−1) with the bfs SPLIT LEAD
+  UNSPLIT (pad pair moved before the opener), standard z c1-special, head−2/tail+2. NO jitters
+  anywhere (x0/yz jitters are 2-plane artifacts). The "3-way y-interaction" that blocked the old
+  attempt was the pre-B2 models, not DU. gen_corner_xyz coded; 8/8 byte-exact; suite 50/50.
+  Minimal-box scope only (1 vox/octant); scaling unprobed.
+
 ## Archive / earlier exports (coords to backfill as confirmed)
 Older referenced exports whose exact XYZ should be added here when re-confirmed:
 2494 (solid interior, chunk (2,2,2)); 2906/2910/2935/2937 (z=0 seams, base position

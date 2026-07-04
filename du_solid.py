@@ -1909,6 +1909,59 @@ def gen_corner_yz(nx, depth=2, lx0=10):
     return out
 
 
+# ── 3-PLANE (x=0+y=0+z=0) SURFACE CORNER ─────────────────────────────────────
+# Solved 2026-07-04 against 2949 (2x2x2 origin box, 1 voxel/octant, 8 chunks).
+# The 2026-07-02 attempt managed 1/8 with the pre-B2 models; with the current
+# toolkit SIX octants are plain z-seam bases and two need small extras:
+#   (8,8,7) (8,7,8) (7,8,8) (7,7,8) (7,8,7) = gen_seam_z_high/low at
+#       lx0/ly0 in {-1, 31} with x_fwd_ghost=(cx==7), y_fwd_ghost=(cy==7).
+#   (8,7,7) = base + last-cluster opener +2 (the yz double-neg rule, WITHOUT
+#       3077's layout shift -- that shift is position/config-dependent).
+#   (7,7,7) = base + drop the pad pair before the FG lead (fg0 -2) + last-
+#       cluster opener +2.
+#   (8,8,8) = built from the PLAIN plate @(-1,-1,lz0=-1): the base generator
+#       is unusable here because the plate's bfs SPLIT LEAD (pad pair inside
+#       the opener: 9f 00 ff 01 02 ...) corrupts the degenerate rebuild. The
+#       real chunk UNSPLITS the lead (pad pair moves before the opener), takes
+#       the standard z interior special on c1 (row run0 + (0,0) filler), drops
+#       the head pad pair and appends one at the tail.
+# NO jitter anywhere (the x0 corner jitter and yz reverse jitter are 2-plane
+# artifacts, absent at the triple crossing). Validated at the minimal box only.
+def gen_corner_xyz():
+    """All 8 chunks of the 3-plane surface corner (minimal 2x2x2 origin box,
+    1 voxel per octant) as {(cx,cy,cz): scan}. Byte-exact vs 2949 (8/8)."""
+    out = {}
+    for cx in (7, 8):
+        for cy in (7, 8):
+            kw = dict(lx0=-1 if cx == 8 else 31, ly0=-1 if cy == 8 else 31,
+                      depth=2, x_fwd_ghost=cx == 7, y_fwd_ghost=cy == 7)
+            if (cx, cy) != (8, 8):
+                out[(cx, cy, 8)] = gen_seam_z_high(2, 2, **kw)
+            g = bytearray(gen_seam_z_low(2, 2, **kw))
+            if cy == 7:                                   # y-neg -z octants: opener +2
+                gs = _flat_groups(g)
+                go = gs[2 * 3]                            # last cluster opener
+                g[go] = (g[go] + 2) % 256
+            if (cx, cy) == (7, 7):
+                f0 = _fg0(g)
+                del g[f0-2:f0]                            # fg0 -2
+            out[(cx, cy, 7)] = bytes(g)
+    # (8,8,8): from the plain plate (split lead breaks the base generator here)
+    g = bytearray(gen_heightmap_unified([[2, 2]] * 2, lx0=-1, ly0=-1, lz0=-1))
+    for i in range(len(g) - 5):                           # unsplit the bfs lead
+        if g[i] not in (0, 255) and g[i+1] == 0 and g[i+2] == 255 and g[i+3] == 1:
+            g[i:i+3] = bytes([255, 0, g[i]])
+            break
+    gs = _flat_groups(g)                                  # z interior special on c1
+    r0 = gs[1 * 3 + 1]                                    # c1 row0
+    g[r0+2] = 0; g[r0+6] = 0
+    g[r0+8:r0+8] = _zgrp(0, 0)
+    del g[0:2]                                            # head -2
+    g += bytes([255, 0])                                  # tail +2
+    out[(8, 8, 8)] = bytes(g)
+    return out
+
+
 # ── SMOOTH DISPLACEMENT OVERLAY for seam chunks (END-GOAL arc) ───────────────
 # Pinned by 3081 (in-game smooth tool applied to the 3048 hump across x=0):
 # smoothing changes ONLY displacement slots -- cluster structure, values,
