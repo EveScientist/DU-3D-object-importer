@@ -213,6 +213,65 @@ def gen_y0_from_mesh(obj_path_or_geom, n_low=2, n_high=2, nx=2, xoff=0.0,
             (8, 7, 8): D.apply_seam_displacement(gl, vlist=build_vlist(lprof, -n_low))}
 
 
+# ── OBJ -> blueprint driver (heightfield meshes, proven region types) ────────
+# Envelopes are never hand-rolled (import-test guidance): the driver picks a
+# donor export whose h3 chunk set matches the target region, keyed here.
+# Donor exports are found in exports/ or exports/archive (user shuffles them).
+DONORS = {
+    'single':  (2700, {(8, 8, 8): 514}),
+    'xgrid':   (2669, {(8, 8, 8): 756, (9, 8, 8): 587}),
+    'x0':      (3032, {(8, 8, 8): 587, (7, 8, 8): 756}),
+    'y0':      (3038, {(8, 8, 8): 719, (8, 7, 8): 658}),
+}
+
+
+def _find_export(num):
+    import os
+    for d in ('exports', 'exports/archive'):
+        p = f'/home/du/{d}/{num}_export.blueprint'
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f'{num}_export.blueprint')
+
+
+def build_heightfield_blueprint(obj_path_or_geom, out_path, region, **kw):
+    """Mesh -> importable blueprint for one of the proven region types:
+      region='single': kw nx, ny, x0, y0 (patch in one chunk, lx0/ly0 def 10)
+      region='xgrid':  kw nx, ny, gx, gy (spans a chunk-grid boundary)
+      region='x0':     kw n_low, n_high, ny, xoff (across the x=0 octant seam)
+      region='y0':     kw n_low, n_high, nx, xoff, yoff (across y=0)
+    Donor envelope/mc from DONORS (mc is displacement-invariant, so any mesh
+    whose BLOCKY occupancy matches the donor's is assemblable). Returns the
+    number of substituted chunks."""
+    import du_assemble as A
+    donor, mcs = DONORS[region]
+    template = _find_export(donor)
+    if region == 'single':
+        scan = gen_from_mesh(obj_path_or_geom, kw['nx'], kw['ny'],
+                             x0=kw.get('x0', 0.0), y0=kw.get('y0', 0.0),
+                             zbase=kw.get('zbase', 0.0))
+        scans = {(8, 8, 8): scan}
+    elif region == 'xgrid':
+        scans = gen_terrain_from_mesh(obj_path_or_geom, kw['nx'], kw['ny'],
+                                      kw['gx'], kw['gy'],
+                                      x0=kw.get('x0', 0.0), y0=kw.get('y0', 0.0),
+                                      zbase=kw.get('zbase', 0.0))
+    elif region == 'x0':
+        scans = gen_x0_from_mesh(obj_path_or_geom, kw['n_low'], kw['n_high'],
+                                 ny=kw['ny'], xoff=kw.get('xoff', 0.0),
+                                 y0=kw.get('y0', 0.0), zbase=kw.get('zbase', 0.0))
+    elif region == 'y0':
+        scans = gen_y0_from_mesh(obj_path_or_geom, kw['n_low'], kw['n_high'],
+                                 nx=kw['nx'], xoff=kw.get('xoff', 0.0),
+                                 yoff=kw.get('yoff', 0.0), zbase=kw.get('zbase', 0.0))
+    else:
+        raise ValueError(region)
+    assert set(scans) == set(mcs), (sorted(scans), sorted(mcs))
+    return A.rebuild_h3(template, out_path,
+                        lambda cx, cy, cz: (scans[(cx, cy, cz)], mcs[(cx, cy, cz)])
+                        if (cx, cy, cz) in scans else None)
+
+
 # ── synthetic test geometry ──────────────────────────────────────────────────
 def plane_mesh(nx, ny, zfn, pad=1.0):
     """Triangulated graph surface z = zfn(x, y) over [-pad, nx+pad] x
