@@ -117,8 +117,13 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
   runs look +y); plain plates = running maxes. HIGH knobs still un-oracled → v2/v3/v4 variants.
 - **tests/y0_varying_tri_import_{v2,v3,v4}_0704_1005.blueprint** (2026-07-04) — diagnostic variants
   of the failed v1, same LOW (now = plain plate) + mc; HIGH differs: v2 = pairwise vals + TRI;
-  v3 = fwd-chain vals (far rows 31) + TRI; v4 = pairwise vals, NO TRI. Deploy in order; first
-  success identifies the rule. Same expected 10-vox shape as v1. AWAITING DEPLOY.
+  v3 = fwd-chain vals (far rows 31) + TRI; v4 = pairwise vals, NO TRI.
+  **v2 (bp 3071) DEPLOYED + RENDERED PERFECTLY 2026-07-04** — arbitrates BOTH knobs: pairwise-prev
+  values confirmed in hardware (far-row 32; fwd-chain/v3 moot) AND the TRI trigger fires with a
+  flat own side (v4 moot). y=0 varying stack hardware-validated; current du_solid code correct
+  as-is. (NB first spawn attempt accidentally pulled stale bp 3068 = v1 — check blueprint ids in
+  the server log when a deploy behaves oddly.) OPTIONAL hardening (low priority): hand-build the
+  same shape in-game and export → byte-oracle for the extrapolated HIGH form.
 - **mc FIELD DECODED (empirically, 14 refs)**: mc = base(chunk type, plate dims) − (last-plate-
   column height − 1). Bases: x0-HIGH 587 (3-col plate, 2 rows) +55/extra col −35/extra row (last
   col = FAR col); x0-LOW 756 (last col = GHOST, width-independent); y0-HIGH 719 (last = far row);
