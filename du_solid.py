@@ -975,7 +975,7 @@ def gen_ymid_xhigh(Rx, lz0=10, h=1, verts=None):
     00ff-x3 clgaps and shrink the two big background runs to T = 158 - 5*Rx + (Rx>=6).
     Byte-exact vs 2848/2850/2852 (Rx=2,4,6). Rx even validated (odd/Rx>6 untested)."""
     g = bytearray(gen_corner_hh(Rx, 33, lz0=lz0, h=h, verts=verts))
-    runs = _abruns(g); T = 158 - 5 * Rx + (Rx >= 6)
+    runs = _abruns(g); T = 158 - 5 * Rx + (Rx >= 6) + 2 * ((Rx + 1) // 12)  # 2nd term pinned Rx=24 (3105); 7-23 unprobed
     big2 = sorted([(n, a) for a, n in runs], reverse=True)[:2]
     ops = [(a, 2 * (n - T)) for n, a in big2] + [(a, 6) for a, n in runs if n == 3]
     for a, cnt in sorted(ops, reverse=True): del g[a:a + cnt]
