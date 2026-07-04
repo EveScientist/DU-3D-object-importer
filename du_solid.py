@@ -1472,6 +1472,165 @@ def _last_decl_end(s):
     return de
 
 
+# ── x=0 seam with VARYING per-column height (relief crossing / near the seam) ──
+# Derivation refs 3048 (sym hump 1,2|2,1) / 3050 (step-2 hump 1,3|3,1) /
+# 3052 (step AT boundary 2,2|1,1) / 3054 (step 2 cols out 2,1,1|1,1,1).
+# Against the correct VARYING plain baseline the refs decompose cleanly:
+#   chunk = plain varying plate (heights incl ghost col = across-boundary col's
+#   height) + the known uniform head / CV-band transforms + a per-cluster FG
+#   rewrite (fillers by neighbor rule, boundary cluster optionally 16-byte
+#   THREE-VERTEX "transition" form when relief steps 1 col from the seam).
+# KEY FACTS pinned by the 4 refs:
+#   * HIGH's head block + first-decl x-marker are parameterized by hB = the
+#     height of the column at x=-1.5, TWO out across the boundary (3052 HIGH:
+#     own cols h1 but block d=1 / first-decl 163 from the h2 across the seam;
+#     rejects min- and far-col-hypotheses). Matches the conceptual model
+#     "HIGH's decl region = that of the (n+2)-plate @lx0=-2" whose first col
+#     is x=-1.5; the plain-plate x-marker value tracks the PREVIOUS column:
+#     200 - h(prev) - 35*(ny-1).
+#   * Filler rule: cluster gets the run0+(hc-2,0) filler form iff own hc >= 2
+#     AND both neighbor clusters' heights >= own; far-edge cluster exempt;
+#     missing outer neighbor of the ghost cluster counts as own. Reduces to
+#     the uniform all-but-far-edge rule. Explains 3052 LOW c2 "unexpectedly
+#     plain" (next cluster h1 < own h2).
+#   * 16-byte form is NOT an extra cluster (earlier note compared against the
+#     uniform baseline): the ghost cluster's own groups convert 8B -> 16B,
+#     1:1, same values/runs. Group = [val,1,run, T0,s0, T1,s1, T2,s2, 0] with
+#     T = (7e,7e,7e+dz), dz in sixths-of-voxel units (84/voxel):
+#       HIGH ghost cluster: ALL rows TRI; dz = +14 opener/last row, +42 middle
+#         row(s); s2 = hc-2, s1 = 0. No fillers (TRI overrides).
+#       LOW ghost cluster: opener + LAST row TRI dz=+14 with s1 = hc-2, s2=0;
+#         middle rows stay flat and take the filler rule as usual.
+#     (h-2 slot position is SIDE-DEPENDENT -- pinned by 3050 h3; at h2 all
+#     s-slots are 0 and 3048 couldn't distinguish. Memory's "final byte=h-2"
+#     was the wrong slot.)
+#   * TRI trigger: the chunk's OWN boundary column pair steps
+#     (h(±0.5) != h(±1.5)). Fits all 8 chunks: 3048/3050 both sides step ->
+#     both TRI; 3052 (step AT seam) / 3054 (step 2 out) -> none. AMBIGUOUS
+#     vs "either side's step triggers both chunks" -- every ref stepped
+#     symmetrically; needs a one-sided-step build (e.g. 1,1|2,1).
+#   * decl-third (3042 h3 flip): 3050 has h3 cols yet ALL decl thirds stay 2
+#     -> the flip keys on the BOUNDARY WINDOW's min height (own pair + opp
+#     pair), not the max. max(2, wmin) fits 3040/3042/3050; provisional.
+# UNVALIDATED: ny > 2 (middle-row +42 assignment), one-sided steps (trigger
+# ambiguity + dz sign for steps UP toward the seam), h >= 4, n_real >= 4.
+def _x0_tri16(val, run, dz, hc, side):
+    """16-byte three-vertex transition group. h-2 slot: s2 for HIGH, s1 for LOW."""
+    T = bytes([0x7e, 0x7e, 0x7e]); T1 = bytes([0x7e, 0x7e, (0x7e + dz) % 256])
+    s = max(hc - 2, 0)
+    if side == 'high':
+        return bytes([val, 1, run]) + T + b'\0' + T1 + b'\0' + T + bytes([s, 0])
+    return bytes([val, 1, run]) + T + b'\0' + T1 + bytes([s]) + T + b'\0\0'
+
+
+def _x0_rebuild_fg(g, plate, ny, side, tri):
+    """Rewrite the FG region of plain varying plate g (heights `plate`, incl the
+    ghost col: first for side='high', last for side='low') into seam form:
+    per-cluster fillers by the neighbor rule + optional 16B ghost cluster.
+    Cluster values/pads are taken from g; runs are rebuilt as the cluster
+    height hc (= own col for edge clusters, max of the adjacent pair for
+    interior ones) -- matches every observed group."""
+    nx = len(plate)
+    hc = [plate[0]] + [max(plate[i-1], plate[i]) for i in range(1, nx)] + [plate[-1]]
+    ghost_ci, far_ci = (0, nx) if side == 'high' else (nx, 0)
+    f0 = _fg0(g)
+    # parse: clusters of 8B flat groups separated by [255,0] runs; keep gaps/trailing
+    i = f0; clusters = []; gaps = []; cur = []
+    while i < len(g) - 7:
+        if g[i+1] == 1 and g[i+3] == 0x7e and g[i+4] == 0x7e and g[i+5] == 0x7e and g[i+7] == 0:
+            cur.append(bytes(g[i:i+8])); i += 8
+        elif g[i] == 255 and g[i+1] == 0:
+            n = 0
+            while i < len(g) - 1 and g[i] == 255 and g[i+1] == 0:
+                n += 1; i += 2
+            if cur:
+                clusters.append(cur); cur = []; gaps.append(n)
+            end = i
+        else:
+            break
+    if cur:
+        clusters.append(cur); gaps.append(0); end = i
+    trail_at = end - 2 * gaps[-1] if gaps else end   # trailing pad = last gap + rest
+    assert len(clusters) == nx + 1, (len(clusters), nx)
+    fg = bytearray()
+    for ci, cl in enumerate(clusters):
+        h = hc[ci]
+        vals = [cl[0][0]] + [grp[0] for grp in cl[1:]
+                             if not (grp[0] < 16 and grp[2] == 0 and grp[6] == 0)]
+        assert len(vals) == ny + 1, (ci, vals)
+        prev_h = hc[ci-1] if ci > 0 else h
+        next_h = hc[ci+1] if ci < nx else h
+        filler = ci != far_ci and h >= 2 and prev_h >= h and next_h >= h
+        if ci == ghost_ci and tri:
+            if side == 'high':                        # all rows TRI, +42 middles
+                for k, v in enumerate(vals):
+                    dz = 14 if k in (0, ny) else 42
+                    fg += _x0_tri16(v, h, dz, h, side)
+            else:                                     # ends TRI, middles flat+filler
+                fg += _x0_tri16(vals[0], h, 14, h, side)
+                for v in vals[1:ny]:
+                    if filler: fg += _zgrp(v, 0) + _zgrp(h - 2, 0)
+                    else:      fg += _zgrp(v, h)
+                fg += _x0_tri16(vals[ny], h, 14, h, side)
+        elif filler:
+            fg += _zgrp(vals[0], h)
+            for v in vals[1:ny]:
+                fg += _zgrp(v, 0) + _zgrp(h - 2, 0)
+            fg += _zgrp(vals[ny], h)
+        else:
+            for v in vals:
+                fg += _zgrp(v, h)
+        if ci < nx:
+            fg += bytes([255, 0]) * gaps[ci]
+    return g[:f0] + bytes(fg) + g[trail_at:]
+
+
+def gen_seam_x0_high_varying(cols, opp, ny=2, ly0=10, lz0=10):
+    """+X chunk (cx=8) of an x=0 seam with per-column heights. cols = own real
+    column heights boundary-first [h(+0.5), h(+1.5), ...]; opp = the -X side's,
+    boundary-first [h(-0.5), h(-1.5), ...] (only the first two are used: ghost
+    col height + head parameter hB). Byte-exact vs 3048/3050/3052/3054 HIGH;
+    reduces to gen_seam_x0_high for uniform input."""
+    assert len(cols) >= 2 and len(opp) >= 2
+    ghost, hB = opp[0], opp[1]
+    plate = [ghost] + list(cols)
+    g = gen_heightmap_unified([[h] * ny for h in plate], lx0=-1, ly0=ly0, lz0=lz0)
+    g = _x0_rebuild_fg(g, plate, ny, 'high', tri=cols[0] != cols[1])
+    wmin = min(cols[0], cols[1], opp[0], opp[1])      # decl-third window (provisional)
+    d2 = max(2, wmin)
+    cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
+    block = bytes([0, 255, 0, cvm2, 1, d2, hB - 1, 0, (33 - (hB - 1)) % 256, 1, d2, hB - 1])
+    fd = _first_decl(g)
+    xmark = (200 - hB - 35 * (ny - 1)) % 256
+    out = block + g[:fd - 4] + bytes([xmark]) + g[fd + 1:]
+    return _seam_x0_decl_third(out, wmin)
+
+
+def gen_seam_x0_low_varying(cols, opp, ny=2, ly0=10, lz0=10):
+    """-X chunk (cx=7) of an x=0 seam with per-column heights. cols = own real
+    column heights boundary-first [h(-0.5), h(-1.5), ...]; opp = the +X side's,
+    boundary-first (opp[0] = ghost col height). Plain varying plate at
+    lx0 = 32-n_real + FG rewrite + the uniform CV<=160 band shift. Byte-exact
+    vs 3048/3050/3052/3054 LOW; reduces to gen_seam_x0_low for uniform input."""
+    assert len(cols) >= 2 and len(opp) >= 2
+    n_real = len(cols); lx0 = 32 - n_real
+    plate = list(reversed(cols)) + [opp[0]]
+    g = gen_heightmap_unified([[h] * ny for h in plate], lx0=lx0, ly0=ly0, lz0=lz0)
+    g = _x0_rebuild_fg(g, plate, ny, 'low', tri=cols[0] != cols[1])
+    wmin = min(cols[0], cols[1], opp[0], opp[1])
+    g = _seam_x0_decl_third(g, wmin)
+    CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256
+    if CV <= 160:
+        g = bytearray(g)
+        f0 = _fg0(g)
+        g[f0:f0] = bytes([255, 0]); del g[-2:]        # fg0 +2, tail absorbs
+        fd = _first_decl(g); de = _last_decl_end(g)
+        g[fd:fd] = bytes([255, 0])                    # pre +2 ...
+        del g[de+2:de+4]                              # ... absorbed after decl run
+        g = bytes(g)
+    return g
+
+
 def gen_corner_hh(Rx, Ry, lz0=10, h=1, verts=None):
     """The HIGH-x HIGH-y chunk of a 2-axis (x & y) corner: Rx real cols, Ry real
     rows, with back-ghosts on BOTH axes. Decls from an (Rx+2)x(Ry+2) plate @(-2,-2);

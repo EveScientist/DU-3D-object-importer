@@ -161,6 +161,29 @@ for _num, _nr, _h in [(3032, 2, 1), (3036, 3, 1), (3040, 2, 2), (3042, 2, 3)]:
     CASES.append((f"x0_{_num}_n{_nr}_h{_h}", _t))
 
 
+# ── x=0 seam: varying per-column height (boundary-first cols/opp) ──────────
+for _num, _hc, _ho, _lc, _lo in [
+        (3048, [2, 1], [2, 1], [2, 1], [2, 1]),        # sym hump, step 1 out
+        (3050, [3, 1], [3, 1], [3, 1], [3, 1]),        # sym hump, step of 2
+        (3052, [1, 1], [2, 2], [2, 2], [1, 1]),        # step AT boundary
+        (3054, [1, 1, 1], [1, 1], [1, 1, 2], [1, 1, 1])]:  # step 2 cols out
+    def _t(num=_num, hc=_hc, ho=_ho, lc=_lc, lo=_lo):
+        c = chunks(num)
+        assert D.gen_seam_x0_high_varying(hc, ho) == c[HIGH_X], "HIGH"
+        assert D.gen_seam_x0_low_varying(lc, lo) == c[LOW_X], "LOW"
+    CASES.append((f"x0_varying_{_num}", _t))
+
+
+@case("x0_varying_reduces_to_uniform")
+def _():
+    for nr, h in [(2, 1), (3, 1), (2, 2), (2, 3)]:
+        u = [h] * nr
+        assert D.gen_seam_x0_high_varying(u, [h, h]) == \
+            D.gen_seam_x0_high(nr, h=h), f"HIGH n{nr} h{h}"
+        assert D.gen_seam_x0_low_varying(u, [h, h]) == \
+            D.gen_seam_x0_low(nr, h=h), f"LOW n{nr} h{h}"
+
+
 # ── y=0 seam ────────────────────────────────────────────────────────────────
 @case("y0_3038")
 def _(num=3038):
