@@ -258,6 +258,13 @@ for _num, _ny in [(2945, 3), (2947, 4)]:
     CASES.append((f"xz_corner_{_num}_ny{_ny}", _t))
 
 
+@case("yz_corner_3077_nx3")
+def _(num=3077):
+    c = chunks(num)
+    for key, scan in D.gen_corner_yz(3).items():
+        assert scan == c[key], f"{key}"
+
+
 def main():
     passed = failed = 0
     for name, fn in CASES:
