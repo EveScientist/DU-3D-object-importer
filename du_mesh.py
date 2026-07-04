@@ -285,6 +285,7 @@ DONORS = {
     'xgrid':   (2669, {(8, 8, 8): 756, (9, 8, 8): 587}),
     'x0':      (3032, {(8, 8, 8): 587, (7, 8, 8): 756}),
     'y0':      (3038, {(8, 8, 8): 719, (8, 7, 8): 658}),
+    'z0':      (2986, {(8, 8, 8): 635, (8, 8, 7): 603}),
 }
 
 
@@ -327,6 +328,10 @@ def build_heightfield_blueprint(obj_path_or_geom, out_path, region, **kw):
         scans = gen_y0_from_mesh(obj_path_or_geom, kw['n_low'], kw['n_high'],
                                  nx=kw['nx'], xoff=kw.get('xoff', 0.0),
                                  yoff=kw.get('yoff', 0.0), zbase=kw.get('zbase', 0.0))
+    elif region == 'z0':
+        scans = gen_z0_from_mesh(obj_path_or_geom, kw['nx'], kw['ny'],
+                                 floor=kw['floor'], xoff=kw.get('xoff', 0.0),
+                                 yoff=kw.get('yoff', 0.0))
     else:
         raise ValueError(region)
     assert set(scans) == set(mcs), (sorted(scans), sorted(mcs))

@@ -206,7 +206,10 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
 - **tests/mesh_z0_tilt_0704_2009.blueprint** — mapping probe: tilted plane z=1−(x+3y)/14 over
   the 2986 footprint, all 9 corner offsets distinct (0..−48). Donor 2986, mcs 635/603.
   EXPECTED: flat tilted top sloping down gently toward +x, strongly toward +y, deepest (−48)
-  at the (+x,+y) corner. AWAITING DEPLOY + orientation read-out.
+  at the (+x,+y) corner.
+  **DEPLOYED AS EXPECTED 2026-07-04 — z=0 crossing displacement (carriers + mapping) hardware-
+  proven. ALL THREE center planes + grid seams + single chunks now render mesh-driven smooth
+  surfaces correctly.**
 
 ## 3-plane surface corner (2949 revisited 2026-07-04)
 - **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
