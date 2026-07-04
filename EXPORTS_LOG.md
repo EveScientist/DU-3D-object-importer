@@ -101,6 +101,21 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 - (none)
 
 ## Generated import tests
+- **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
+  across x=0 (LOW [2,1] / HIGH [2,1,1] boundary-first; TRI transition clusters BOTH chunks —
+  first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying
+  ([2,1,1],[2,1]) mc 642; (7,8,8)=gen_seam_x0_low_varying([2,1],[2,1]) mc 755; envelope 3054;
+  round-trip verified. EXPECTED: 14 vox — Z=10.5: X∈{−1.5,−0.5,+0.5,+1.5,+2.5} × Y∈{10.5,11.5};
+  Z=11.5: X∈{−0.5,+0.5} × Y∈{10.5,11.5}; smooth bevel at the seam. AWAITING DEPLOY.
+- **tests/y0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL mirror of 3066 (one-sided
+  step on −Y side: LOW [2,1] / HIGH [1,1]; TRI in HIGH). (8,8,8)=gen_seam_y0_high_varying([1,1],[2,1])
+  mc 719; (8,7,8)=gen_seam_y0_low_varying([2,1],[1,1]) mc 658; envelope 3066; round-trip verified.
+  EXPECTED: 10 vox — Z=10.5: X∈{10.5,11.5} × Y∈{−1.5,−0.5,+0.5,+1.5}; Z=11.5: X∈{10.5,11.5} ×
+  Y=−0.5; bevel on +Y side of seam. AWAITING DEPLOY.
+- **mc FIELD DECODED (empirically, 14 refs)**: mc = base(chunk type, plate dims) − (last-plate-
+  column height − 1). Bases: x0-HIGH 587 (3-col plate, 2 rows) +55/extra col −35/extra row (last
+  col = FAR col); x0-LOW 756 (last col = GHOST, width-independent); y0-HIGH 719 (last = far row);
+  y0-LOW 658 (last = ghost row). Enables fully novel generated import tests (no donor chunk needed).
 - **tests/z0_novel_pairing_gen.blueprint** (2026-07-03) — novel pairing: HIGH = 3014's y-varying
   surface (gen_seam_z_high_varying([[3,2],[2,2]]), mc 635) + LOW = 3024's deep varying ground
   (gen_seam_z_low_varying([[5,5],[3,3]]), mc 603); template/envelope 3028; round-trip verified.
