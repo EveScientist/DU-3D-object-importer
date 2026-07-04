@@ -214,17 +214,20 @@ def gen_y0_from_mesh(obj_path_or_geom, n_low=2, n_high=2, nx=2, xoff=0.0,
 
 
 def gen_z0_from_mesh(obj_path_or_geom, nx, ny, floor, xoff=0.0, yoff=0.0,
-                     lx0=10, ly0=10):
-    """Mesh -> BLOCKY z=0 crossing chunk pair {(8,8,8), (8,8,7)}: terrain
-    whose solid runs from a floor below z=0 up to the mesh's top surface.
+                     lx0=10, ly0=10, displace=True):
+    """Mesh -> z=0 crossing chunk pair {(8,8,8), (8,8,7)}: terrain whose
+    solid runs from a floor below z=0 up to the mesh's top surface.
     floor < 0 (integer voxel plane). Per-column HIGH depths = surface voxels
     above 0 (+1 boundary ghost) from cell-center sampling; LOW depths =
     |floor| (+1). Encodes via the z0 representation chooser (pinned 3022/
     3024/3026): per-column LOW extras = low_real - min(low_real); max extra
     0 -> LOW uniform; 1 -> variation FOLDS INTO HIGH (+extra on its depth);
-    >=2 -> LOW carries ALL variation, HIGH plain at uniform-min. NOTE: only
-    vertical BLOCKY structure here -- z0 displacement carriers await a
-    probe build (Build AW). Flat floor => LOW uniform (the common case)."""
+    >=2 -> LOW carries ALL variation, HIGH plain at uniform-min.
+    displace=True adds per-corner vertical offsets: Build AW (3095 vs 2986)
+    pinned that z-seam chunks use the SAME carrier grammar as x0/y0 (12B
+    expansion s=run-1, fillers in-place carrying their row's corner value,
+    run-0 rows neutral) and that BOTH chunks carry the same surface offsets
+    (LOW mirrors HIGH -- the ghost layer includes the surface)."""
     if isinstance(obj_path_or_geom, tuple):
         verts, faces = obj_path_or_geom
     else:
@@ -242,8 +245,14 @@ def gen_z0_from_mesh(obj_path_or_geom, nx, ny, floor, xoff=0.0, yoff=0.0,
     minlow = min(min(c) for c in low_real)
     extras = [[c - minlow for c in col] for col in low_real]
     mx = max(max(c) for c in extras)
+    uniform_high = all(c == Hdep[0][0] for col in Hdep for c in col)
     if mx == 0:
-        high = D.gen_seam_z_high_varying(Hdep, lx0=lx0, ly0=ly0)
+        if minlow <= 1:                            # low_real 1 -> DEGENERATE high form
+            assert uniform_high, "degenerate-varying z0 form underived (3002)"
+            high = D.gen_seam_z_high(nx, ny, lx0=lx0, ly0=ly0,
+                                     depth=Hdep[0][0], opp_depth=minlow + 1)
+        else:
+            high = D.gen_seam_z_high_varying(Hdep, lx0=lx0, ly0=ly0)
         low = D.gen_seam_z_low(nx, ny, lx0=lx0, ly0=ly0, depth=minlow + 1)
     elif mx == 1:
         Hfold = [[Hdep[i][j] + extras[i][j] for j in range(ny)] for i in range(nx)]
@@ -253,6 +262,17 @@ def gen_z0_from_mesh(obj_path_or_geom, nx, ny, floor, xoff=0.0, yoff=0.0,
         high = D.gen_seam_z_high_varying(Hdep, lx0=lx0, ly0=ly0)
         low = D.gen_seam_z_low_varying([[lr + 1 for lr in col] for col in low_real],
                                        lx0=lx0, ly0=ly0)
+    if displace:
+        vl = []
+        for i in range(nx + 1):                   # x-lines (cluster-major)
+            for j in range(ny + 1):               # y-lines within
+                adj = [Hdep[ci][cj] - 1 for ci in (i - 1, i) for cj in (j - 1, j)
+                       if 0 <= ci < nx and 0 <= cj < ny]
+                z = top_z(verts, faces, xoff + i, yoff + j)
+                dz = 0 if z is None else round((z - max(adj)) * 84)
+                vl.append(None if dz == 0 else (0, 0, dz))
+        high = D.apply_seam_displacement(high, vlist=vl)
+        low = D.apply_seam_displacement(low, vlist=vl)
     return {(8, 8, 8): high, (8, 8, 7): low}
 
 
@@ -384,12 +404,17 @@ def _selftest():
     scans = gen_y0_from_mesh(geom, 2, 2, nx=2, xoff=-10.0, yoff=2.0)
     assert scans[(8, 8, 8)] == D.gen_seam_y0_high_varying([1, 1], [1, 1]), "y0 flat HIGH"
     assert scans[(8, 7, 8)] == D.gen_seam_y0_low_varying([1, 1], [1, 1]), "y0 flat LOW"
-    # 8) z=0 crossing: step mesh == the 3004 family (depths [[3,3],[2,2]], low 3)
+    # 8) z=0 crossing (blocky): step mesh == the 3004 family
     geom = plane_mesh(2, 2, lambda x, y: 2.0 if x < 1 else 1.0)
-    scans = gen_z0_from_mesh(geom, 2, 2, floor=-2)
+    scans = gen_z0_from_mesh(geom, 2, 2, floor=-2, displace=False)
     assert scans[(8, 8, 8)] == D.gen_seam_z_high_varying([[3, 3], [2, 2]]), "z0 HIGH"
     assert scans[(8, 8, 7)] == D.gen_seam_z_low(2, 2, depth=3), "z0 LOW"
-    print("du_mesh selftest: 8/8 OK")
+    # 9) z=0 displaced: flat mesh at z=1 -> no offsets == blocky 2986 form
+    geom = plane_mesh(2, 2, lambda x, y: 1.0)
+    scans = gen_z0_from_mesh(geom, 2, 2, floor=-1)
+    assert scans[(8, 8, 8)] == D.gen_seam_z_high(2, 2, depth=2), "z0 disp flat HIGH"
+    assert scans[(8, 8, 7)] == D.gen_seam_z_low(2, 2, depth=2), "z0 disp flat LOW"
+    print("du_mesh selftest: 9/9 OK")
 
 
 if __name__ == "__main__":

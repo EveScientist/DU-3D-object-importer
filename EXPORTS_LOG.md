@@ -192,6 +192,22 @@ depth 2/3/4 sym + asym (HIGH couples to opp real-layer count); footprints nx=2�
 nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 step recurrence
 (well-motivated), varying per-column depth (relief across z=0 — the next frontier).
 
+## z=0 displacement carriers (Build AW, 2026-07-04)
+- **3095** (Build AW — 2986 blocky base + user hand-dragged top vertices, asymmetric) —
+  z-SEAM DISPLACEMENT CARRIERS = SAME GRAMMAR as x0/y0: flat run>0 → 12B two-vertex
+  [val,1,run, 7e³, run−1, V1, 0,0]; (0,0) filler in-place carrying its row's corner value
+  (run-0 row emits neutral but its V surfaces in the filler — matches apply_seam_displacement's
+  walk exactly); run-0 rows neutral. LOW CHUNK MIRRORS HIGH's surface offsets (ghost layer
+  includes the surface): identical value sets (−20/−68/−8/−36/−2/−43) in both chunks.
+  apply_seam_displacement worked UNCHANGED. (3095 also contains a stray (7,8,8) chunk 671B —
+  the hand-drag spilled a sliver across x=0; not needed for the decode.) gen_z0_from_mesh
+  gained displace=True; selftest 9/9 (flat reduction exposed + fixed a chooser gap: low_real
+  ≤1 requires the DEGENERATE high form; degenerate-varying still underived/asserted).
+- **tests/mesh_z0_tilt_0704_2009.blueprint** — mapping probe: tilted plane z=1−(x+3y)/14 over
+  the 2986 footprint, all 9 corner offsets distinct (0..−48). Donor 2986, mcs 635/603.
+  EXPECTED: flat tilted top sloping down gently toward +x, strongly toward +y, deepest (−48)
+  at the (+x,+y) corner. AWAITING DEPLOY + orientation read-out.
+
 ## 3-plane surface corner (2949 revisited 2026-07-04)
 - **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
   with the current toolkit (old attempt: 1/8). SIX octants = plain gen_seam_z_high/low bases at
