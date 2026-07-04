@@ -141,7 +141,13 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 - **tests/mesh_x0_valley_fixed_0704_1500.blueprint** (2026-07-04) — the intended valley with the
   phase FIXED (0.75 − 0.25·cos): line offsets 0/−21/−42/−21/0, dip AT x=0. Donor 3032; round-trip
   verified. EXPECTED: smooth half-voxel dip at the octant boundary rising to full height at ±2.
-  AWAITING DEPLOY (optional confirmation — the ramp already proves the path).
+  **RENDERED AS A VALLEY 2026-07-04 — confirmed; increment 3 (x=0 crossing) fully closed.**
+- **tests/mesh_y0_ramp_0704_1503.blueprint** (2026-07-04) — increment 4: linear ramp across the
+  y=0 octant seam (asymmetric probe first, per the x0 lesson): z(y)=1−(y+2)/4, line offsets
+  y=−2..+2 → 0/−21/−42/−63/−84, uniform in x. gen_y0_from_mesh (new; transposed group order:
+  clusters = x-lines, groups within = y-lines ascending, opener first). Donor 3038; mcs
+  {(8,8,8):719,(8,7,8):658}; round-trip verified; selftest 7/7. EXPECTED: smooth wedge sloping
+  down toward +y, full height at y=−2 to a voxel deep at y=+2, no crack at y=0. AWAITING DEPLOY.
 - **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
   across x=0 (LOW [2,1] / HIGH [2,1,1] boundary-first; TRI transition clusters BOTH chunks —
   first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying

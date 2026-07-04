@@ -173,6 +173,46 @@ def gen_x0_from_mesh(obj_path_or_geom, n_low=2, n_high=2, ny=2, xoff=0.0,
             (7, 8, 8): D.apply_seam_displacement(gl, vlist=vl)}
 
 
+def gen_y0_from_mesh(obj_path_or_geom, n_low=2, n_high=2, nx=2, xoff=0.0,
+                     yoff=0.0, zbase=0.0, lx0=10, lz0=10):
+    """Mesh -> displaced y=0 OCTANT-SEAM chunk pair {(8,8,8), (8,7,8)}.
+    Transpose of gen_x0_from_mesh: rows -n_low..-1 real on the LOW side,
+    0..n_high-1 on the HIGH side; nx columns at world x = lx0..lx0+nx.
+    Sampling at mesh (xoff + world_x, yoff + world_y). y0 chunk group order:
+    clusters = x-lines (lx0+i), groups within = y-lines ascending from the
+    plate's ly0 (opener = first y-line). Blocky heights may vary along y only
+    (the y0 varying generators are x-uniform); vertical offsets only."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+
+    def rowh(y):                                  # blocky height of row [y, y+1)
+        zc = top_z(verts, faces, xoff + lx0 + nx / 2.0, yoff + y + 0.5)
+        assert zc is not None, f"row {y} not covered"
+        return max(1, round(zc - zbase))
+
+    high = [rowh(j) for j in range(n_high)]       # boundary-first
+    low = [rowh(-1 - j) for j in range(n_low)]
+    gh = D.gen_seam_y0_high_varying(high, low, nx=nx, lx0=lx0, lz0=lz0)
+    gl = D.gen_seam_y0_low_varying(low, high, nx=nx, lx0=lx0, lz0=lz0)
+
+    def build_vlist(prof, yline0):
+        vl = []
+        for i in range(nx + 1):                   # x-lines (cluster-major)
+            for j in range(len(prof) + 1):        # y-lines within
+                adj = [prof[c] for c in (j - 1, j) if 0 <= c < len(prof)]
+                z = top_z(verts, faces, xoff + lx0 + i, yoff + yline0 + j)
+                dz = 0 if z is None else round((z - zbase - max(adj)) * 84)
+                vl.append(None if dz == 0 else (0, 0, dz))
+        return vl
+
+    hprof = [low[0]] + high                       # HIGH plate rows @ly0=-1
+    lprof = list(reversed(low)) + [high[0]]       # LOW plate rows @ly0=32-n_low
+    return {(8, 8, 8): D.apply_seam_displacement(gh, vlist=build_vlist(hprof, -1)),
+            (8, 7, 8): D.apply_seam_displacement(gl, vlist=build_vlist(lprof, -n_low))}
+
+
 # ── synthetic test geometry ──────────────────────────────────────────────────
 def plane_mesh(nx, ny, zfn, pad=1.0):
     """Triangulated graph surface z = zfn(x, y) over [-pad, nx+pad] x
@@ -237,7 +277,12 @@ def _selftest():
     scans = gen_x0_from_mesh(geom, 2, 2, ny=2, xoff=2.0)
     assert scans[(8, 8, 8)] == D.gen_seam_x0_high_varying([1, 1], [1, 1]), "x0 flat HIGH"
     assert scans[(7, 8, 8)] == D.gen_seam_x0_low_varying([1, 1], [1, 1]), "x0 flat LOW"
-    print("du_mesh selftest: 6/6 OK")
+    # 7) flat mesh across y=0 == undisplaced varying pair
+    geom = plane_mesh(2, 4, lambda x, y: 1.0)
+    scans = gen_y0_from_mesh(geom, 2, 2, nx=2, xoff=-10.0, yoff=2.0)
+    assert scans[(8, 8, 8)] == D.gen_seam_y0_high_varying([1, 1], [1, 1]), "y0 flat HIGH"
+    assert scans[(8, 7, 8)] == D.gen_seam_y0_low_varying([1, 1], [1, 1]), "y0 flat LOW"
+    print("du_mesh selftest: 7/7 OK")
 
 
 if __name__ == "__main__":
