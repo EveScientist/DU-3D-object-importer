@@ -211,6 +211,15 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   proven. ALL THREE center planes + grid seams + single chunks now render mesh-driven smooth
   surfaces correctly.**
 
+## Multi-region composition probe (2026-07-04)
+- **tests/mesh_xy_tilt_0704_2019.blueprint** — displaced x=0+y=0 SURFACE CORNER: one tilted plane
+  z=1−(2(x+2)+10(y+2))/84 over the 3079 footprint (all 25 corner lines distinct, 0..−48).
+  gen_xy_from_mesh (new): gen_corner_hh(verts) for (8,8,8) + displaced plates through the
+  y0-splice/x0-head recipes; flat-mesh reduction == gen_corner_xy blocky (selftest 10/10).
+  Donor 3079, mcs 681/620/594/533. EXPECTED: ONE continuous plane, gently down toward +x,
+  strongly down toward +y, deepest at (+2,+2); NO crack at x=0, y=0, or the corner. Any
+  discontinuity localizes the offending chunk. AWAITING DEPLOY.
+
 ## 3-plane surface corner (2949 revisited 2026-07-04)
 - **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
   with the current toolkit (old attempt: 1/8). SIX octants = plain gen_seam_z_high/low bases at

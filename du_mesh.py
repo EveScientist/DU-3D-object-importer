@@ -276,6 +276,57 @@ def gen_z0_from_mesh(obj_path_or_geom, nx, ny, floor, xoff=0.0, yoff=0.0,
     return {(8, 8, 8): high, (8, 8, 7): low}
 
 
+def gen_xy_from_mesh(obj_path_or_geom, rx=2, ry=2, xoff=0.0, yoff=0.0,
+                     zbase=0.0, lz0=10):
+    """Mesh -> displaced x=0+y=0 SURFACE-CORNER chunk set (4 chunks, h1
+    blocky, rx/ry real cols/rows per side -- the 3079 shape). Displacement
+    rides the plain-plate carriers per chunk recipe (gen_corner_xy):
+      (8,8,8) gen_corner_hh(verts=)          grid x,y-lines -1..r
+      (7,7,8) gen_surface_displaced          grid lines -r..1
+      (7,8,8) y0 decl splice over displaced FG plate (lines x -r..1, y -1..r)
+      (8,7,8) displaced plate + x0-head      (lines x -1..r, y -r..1)
+    Sampling at mesh (xoff + global_x, yoff + global_y); h_ref = 1 (h1 scope).
+    Column-major (x outer, y inner) vert order throughout."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+
+    def V(xl, yl):
+        z = top_z(verts, faces, xoff + xl, yoff + yl)
+        dz = 0 if z is None else round((z - zbase - 1) * 84)
+        return (D.ORIGIN, D.ORIGIN) if dz == 0 else (D.ORIGIN, (0, 0, dz))
+
+    def grid(xlines, ylines):
+        return [V(xl, yl) for xl in xlines for yl in ylines]
+
+    from du_solid import gen_heightmap_unified, _fg0, _first_decl
+    ny = ry + 1
+    out = {(8, 8, 8): D.gen_corner_hh(rx, ry, lz0=lz0,
+                                      verts=grid(range(-1, rx + 1), range(-1, ry + 1)))}
+    out[(7, 7, 8)] = D.gen_surface_displaced(
+        [[1] * ny] * (rx + 1), grid(range(-rx, 2), range(-ry, 2)),
+        lx0=32 - rx, ly0=32 - ry, lz0=lz0)
+    gB = gen_heightmap_unified([[1] * (ry + 2)] * (rx + 1), lx0=32 - rx, ly0=-2, lz0=lz0)
+    gA = D.gen_surface_displaced([[1] * ny] * (rx + 1),
+                                 grid(range(-rx, 2), range(-1, ry + 1)),
+                                 lx0=32 - rx, ly0=-1, lz0=lz0)
+    fA = _fg0(gen_heightmap_unified([[1] * ny] * (rx + 1), lx0=32 - rx, ly0=-1, lz0=lz0))
+    out[(7, 8, 8)] = gB[:_fg0(gB)] + gA[fA:]
+    g = D.gen_surface_displaced([[1] * ny] * (rx + 1),
+                                grid(range(-1, rx + 1), range(-ry, 2)),
+                                lx0=-1, ly0=32 - ry, lz0=lz0)
+    cvm2 = (217 - 55 * (-2) + 35 * (32 - ry) + lz0) % 256
+    ins = bytes([cvm2, 1, 2, 0, 0]) + bytes([33, 1, 2, 0, 0]) * (ny - 1)
+    fd = _first_decl(g)
+    g2 = bytearray(g)
+    g2[fd] = (200 - 1 - 35 * (ny - 1)) % 256
+    g2[fd - 10:fd - 10] = ins
+    del g2[fd - 10 + len(ins):fd - 8 + len(ins)]
+    out[(8, 7, 8)] = bytes(g2)
+    return out
+
+
 # ── OBJ -> blueprint driver (heightfield meshes, proven region types) ────────
 # Envelopes are never hand-rolled (import-test guidance): the driver picks a
 # donor export whose h3 chunk set matches the target region, keyed here.
@@ -419,7 +470,14 @@ def _selftest():
     scans = gen_z0_from_mesh(geom, 2, 2, floor=-1)
     assert scans[(8, 8, 8)] == D.gen_seam_z_high(2, 2, depth=2), "z0 disp flat HIGH"
     assert scans[(8, 8, 7)] == D.gen_seam_z_low(2, 2, depth=2), "z0 disp flat LOW"
-    print("du_mesh selftest: 9/9 OK")
+    # 10) xy corner: flat mesh -> all 4 chunks == blocky gen_corner_xy
+    geom = plane_mesh(4, 4, lambda x, y: 1.0)
+    scans = gen_xy_from_mesh(geom, 2, 2, xoff=2.0, yoff=2.0)
+    want = D.gen_corner_xy(2, 2)
+    assert set(scans) == set(want)
+    for k in want:
+        assert scans[k] == want[k], f"xy flat {k}"
+    print("du_mesh selftest: 10/10 OK")
 
 
 if __name__ == "__main__":
