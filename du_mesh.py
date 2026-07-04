@@ -327,6 +327,47 @@ def gen_xy_from_mesh(obj_path_or_geom, rx=2, ry=2, xoff=0.0, yoff=0.0,
     return out
 
 
+def gen_xz_from_mesh(obj_path_or_geom, ny, xoff=0.0, yoff=0.0, ly0=10):
+    """Mesh -> displaced x=0+z=0 SURFACE CORNER (4 chunks, the 2945/2947
+    shape: 1 real col each side of x=0, ny rows, 1 real z layer each side of
+    z=0). Top-surface corner offsets vs the z=+1 blocky top ride the pinned
+    carrier grammar via apply_seam_displacement per chunk; the -z chunks
+    MIRROR the +z chunks' offsets (3095 rule: the ghost layer includes the
+    surface). Corner grid per chunk: x-lines -1..1, y-lines ly0..ly0+ny."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+    vl = []
+    for xl in (-1, 0, 1):
+        for yl in range(ly0, ly0 + ny + 1):
+            z = top_z(verts, faces, xoff + xl, yoff + yl)
+            dz = 0 if z is None else round((z - 1.0) * 84)
+            vl.append(None if dz == 0 else (0, 0, dz))
+    return {k: D.apply_seam_displacement(g, vlist=vl)
+            for k, g in D.gen_corner_xz(ny).items()}
+
+
+def gen_yz_from_mesh(obj_path_or_geom, nx, xoff=0.0, yoff=0.0, lx0=10):
+    """Mesh -> displaced y=0+z=0 SURFACE CORNER (4 chunks, the 3077 shape:
+    nx x-cols, 1 real row each side of y=0, 1 real z layer each side of z=0).
+    Same carrier/mirror rules as gen_xz_from_mesh. Corner grid per chunk:
+    x-lines lx0..lx0+nx, y-lines -1..1 (y0 group order: clusters = x-lines,
+    rows within = y-lines)."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+    vl = []
+    for xl in range(lx0, lx0 + nx + 1):
+        for yl in (-1, 0, 1):
+            z = top_z(verts, faces, xoff + xl, yoff + yl)
+            dz = 0 if z is None else round((z - 1.0) * 84)
+            vl.append(None if dz == 0 else (0, 0, dz))
+    return {k: D.apply_seam_displacement(g, vlist=vl)
+            for k, g in D.gen_corner_yz(nx).items()}
+
+
 # ── OBJ -> blueprint driver (heightfield meshes, proven region types) ────────
 # Envelopes are never hand-rolled (import-test guidance): the driver picks a
 # donor export whose h3 chunk set matches the target region, keyed here.
@@ -483,7 +524,18 @@ def _selftest():
     assert set(scans) == set(want)
     for k in want:
         assert scans[k] == want[k], f"xy flat {k}"
-    print("du_mesh selftest: 10/10 OK")
+    # 11) xz / yz corners: flat mesh -> blocky gen_corner_xz / gen_corner_yz
+    geom = plane_mesh(2, 5, lambda x, y: 1.0)
+    scans = gen_xz_from_mesh(geom, 4, xoff=1.0, yoff=-9.0, ly0=10)
+    want = D.gen_corner_xz(4)
+    for k in want:
+        assert scans[k] == want[k], f"xz flat {k}"
+    geom = plane_mesh(4, 2, lambda x, y: 1.0)
+    scans = gen_yz_from_mesh(geom, 3, xoff=-9.0, yoff=1.0, lx0=10)
+    want = D.gen_corner_yz(3)
+    for k in want:
+        assert scans[k] == want[k], f"yz flat {k}"
+    print("du_mesh selftest: 11/11 OK")
 
 
 if __name__ == "__main__":

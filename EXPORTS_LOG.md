@@ -221,6 +221,15 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   discontinuity localizes the offending chunk.
   **DEPLOYED AS EXPECTED 2026-07-04 — multi-region composition (4 octant chunks, 3 recipe
   families, one continuous displaced plane) hardware-proven.**
+- **tests/mesh_xz_tilt_0704_2027.blueprint** — displaced x=0+z=0 corner (2947 shape/donor, ny=4):
+  tilt dz=−(20(x+1)+4(y−10)), 15 distinct corners, 0..−56. gen_xz_from_mesh: vlist through the
+  jittered/fwd-ghost z-degenerate corner chunks; −z chunks mirror +z offsets (3095 rule).
+  EXPECTED: continuous plane, strong slope toward +x, gentle toward +y, deepest (+x, far-y),
+  no crack at x=0. AWAITING DEPLOY.
+- **tests/mesh_yz_tilt_0704_2027.blueprint** — displaced y=0+z=0 corner (3077 shape/donor, nx=3):
+  tilt dz=−(6(x−10)+20(y+1)), 12 distinct corners, 0..−58. gen_yz_from_mesh. EXPECTED:
+  continuous plane, gentle toward +x, strong toward +y, deepest (far-x, +y), no crack at y=0.
+  AWAITING DEPLOY. (Both: flat-mesh reductions == blocky gen_corner_xz/yz; selftest 11/11.)
 
 ## 3-plane surface corner (2949 revisited 2026-07-04)
 - **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
