@@ -106,12 +106,19 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
   first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying
   ([2,1,1],[2,1]) mc 642; (7,8,8)=gen_seam_x0_low_varying([2,1],[2,1]) mc 755; envelope 3054;
   round-trip verified. EXPECTED: 14 vox — Z=10.5: X∈{−1.5,−0.5,+0.5,+1.5,+2.5} × Y∈{10.5,11.5};
-  Z=11.5: X∈{−0.5,+0.5} × Y∈{10.5,11.5}; smooth bevel at the seam. AWAITING DEPLOY.
-- **tests/y0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL mirror of 3066 (one-sided
-  step on −Y side: LOW [2,1] / HIGH [1,1]; TRI in HIGH). (8,8,8)=gen_seam_y0_high_varying([1,1],[2,1])
-  mc 719; (8,7,8)=gen_seam_y0_low_varying([2,1],[1,1]) mc 658; envelope 3066; round-trip verified.
-  EXPECTED: 10 vox — Z=10.5: X∈{10.5,11.5} × Y∈{−1.5,−0.5,+0.5,+1.5}; Z=11.5: X∈{10.5,11.5} ×
-  Y=−0.5; bevel on +Y side of seam. AWAITING DEPLOY.
+  Z=11.5: X∈{−0.5,+0.5} × Y∈{10.5,11.5}; smooth bevel at the seam.
+  **DEPLOYED PERFECTLY 2026-07-04** — x=0 varying stack incl generated TRI groups hardware-validated.
+- **tests/y0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — v1, mirror of 3066 (LOW [2,1] /
+  HIGH [1,1]). **FAILED TO DEPLOY (bp 3068): "Deserializing invalid vertex" on BOTH cells; client
+  crash.** Post-mortem: LOW deviated from the plain oracle plate by ONE byte — the "chain-reset"
+  ghost val 32 vs 31. Led to the PAIRWISE-PREV value rule (val_j=33−max(h_j,h_prev), HIGH ghost's
+  prev = hB): fits every real ref byte (suite 46/46) and differs from chain-reset exactly at
+  own-boundary>ghost configs like this one. Seam chunks = pairwise both directions (vals look −y,
+  runs look +y); plain plates = running maxes. HIGH knobs still un-oracled → v2/v3/v4 variants.
+- **tests/y0_varying_tri_import_{v2,v3,v4}_0704_1005.blueprint** (2026-07-04) — diagnostic variants
+  of the failed v1, same LOW (now = plain plate) + mc; HIGH differs: v2 = pairwise vals + TRI;
+  v3 = fwd-chain vals (far rows 31) + TRI; v4 = pairwise vals, NO TRI. Deploy in order; first
+  success identifies the rule. Same expected 10-vox shape as v1. AWAITING DEPLOY.
 - **mc FIELD DECODED (empirically, 14 refs)**: mc = base(chunk type, plate dims) − (last-plate-
   column height − 1). Bases: x0-HIGH 587 (3-col plate, 2 rows) +55/extra col −35/extra row (last
   col = FAR col); x0-LOW 756 (last col = GHOST, width-independent); y0-HIGH 719 (last = far row);

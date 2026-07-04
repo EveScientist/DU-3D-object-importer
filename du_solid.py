@@ -1717,22 +1717,26 @@ def _y0_rebuild_fg(g, prof, nx, side, tri, hB=None):
     f0, clusters, gaps, trail_at = _parse_fg_clusters(g)
     assert len(clusters) == nx + 1, (len(clusters), nx)
     # per-group (val, run) specs; None val = keep baseline opener value.
-    # Row runs are PAIRWISE max(own, next group) -- 3066 (one-sided step)
-    # discriminates this from the plain plate's bwd-running-max, which 3064's
-    # profiles couldn't; the ghost row participates as a normal neighbor.
+    # SEAM chunks encode rows PAIRWISE (vs the plain plate's running maxes):
+    #   val_j = 33 - max(h_j, h_prev)   (prev = -y neighbor; HIGH ghost's prev
+    #                                    is hB across the seam; LOW row0's is own)
+    #   run_j = max(h_j, h_next)        (next = +y neighbor; last row's is own)
+    # Runs pinned by 3066 (one-sided step; plain bwd-max fails there). Values:
+    # pairwise-prev fits every real ref byte; the earlier "own-rows-only chain
+    # reset" reading was indistinguishable on refs (all had ghost >= boundary
+    # row) and produced an INVALID-VERTEX deploy failure on the first config
+    # where they differ (y0 import test B, own boundary taller than ghost --
+    # its LOW deviated from the plain oracle plate by exactly that one byte).
+    # HIGH far-row descent profiles still can't discriminate pairwise-prev
+    # from a with-ghost fwd chain (both fit all refs) -- needs an oracle.
     runs = [max(prof[j], prof[j+1]) if j < ny - 1 else prof[j] for j in range(ny)]
+    prev0 = hB if side == 'high' else prof[0]
+    vals_ = [(33 - max(prof[j], prof[j-1] if j > 0 else prev0)) % 256
+             for j in range(ny)]
     if side == 'high':
-        ghost, own = prof[0], prof[1:]
-        m = max(hB, ghost)
-        specs = [(None, m), ((33 - m) % 256, runs[0])]
-        for i in range(len(own)):
-            specs.append(((33 - max(own[:i+1])) % 256, runs[i + 1]))
+        specs = [(None, max(hB, prof[0]))] + list(zip(vals_, runs))
     else:
-        own, ghost = prof[:-1], prof[-1]
-        specs = [(None, None)]                        # opener untouched
-        for i in range(len(own)):
-            specs.append(((33 - max(own[:i+1])) % 256, runs[i]))
-        specs.append(((33 - ghost) % 256, runs[ny - 1]))
+        specs = [(None, None)] + list(zip(vals_, runs))
     fg = bytearray()
     for ci, cl in enumerate(clusters):
         assert len(cl) == ny + 1, (ci, len(cl))
