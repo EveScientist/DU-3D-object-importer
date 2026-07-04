@@ -122,7 +122,14 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
   dip line sits exactly ON the boundary, forcing shared ghost-line offsets). Donor 2669 (= flat
   gen_terrain(30,10,4,2)); mcs {(8,8,8):756,(9,8,8):587}; round-trip verified. Selftest 4/4 (adds
   boundary-spanning ramp == gen_terrain byte-exact). EXPECTED: 4×2 plate, one continuous smooth
-  valley across the boundary, NO crack or step. AWAITING DEPLOY.
+  valley across the boundary, NO crack or step.
+  **RENDERED PERFECTLY 2026-07-04 — multi-chunk mesh terrain (shared ghost-line offsets) hardware-proven.**
+- **tests/mesh_x0_wave_0704_1446.blueprint** (2026-07-04) — increment 3: the cosine valley across
+  the x=0 OCTANT seam (dip line −42 exactly ON x=0), via gen_x0_from_mesh → gen_seam_x0_*_varying
+  + apply_seam_displacement per-group vlist mode (new; fillers inherit preceding row's V, run-0
+  rows neutral). Donor 3032 (uniform x0 pair); mcs {(8,8,8):587,(7,8,8):756}; round-trip verified;
+  selftest 6/6 (adds 3081-vlist equivalence + flat-across-x0 reduction). EXPECTED: 4×2 plate
+  straddling x=0, smooth half-voxel dip AT the octant boundary, no crack. AWAITING DEPLOY.
 - **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
   across x=0 (LOW [2,1] / HIGH [2,1,1] boundary-first; TRI transition clusters BOTH chunks —
   first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying

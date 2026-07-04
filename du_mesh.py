@@ -124,6 +124,55 @@ def gen_terrain_from_mesh(obj_path_or_geom, nx, ny, gx, gy, x0=0.0, y0=0.0,
     return D.gen_terrain(corner_z, gx, gy, lz0=lz0, h=h)
 
 
+def gen_x0_from_mesh(obj_path_or_geom, n_low=2, n_high=2, ny=2, xoff=0.0,
+                     y0=0.0, zbase=0.0, ly0=10, lz0=10):
+    """Mesh -> displaced x=0 OCTANT-SEAM chunk pair {(8,8,8), (7,8,8)}.
+    Samples the mesh at mesh-x = xoff + global-x (the seam sits at mesh-x =
+    xoff; columns -n_low..-1 real on the LOW side, 0..n_high-1 on the HIGH). Blocky per-column
+    heights from cell centers feed gen_seam_x0_*_varying; per-corner vertical
+    offsets ride apply_seam_displacement's per-group vlist (seam chunks' FG
+    groups correspond 1:1 to plate corner lines: cluster ci <-> x-line
+    lx0+i, groups within <-> y-lines). Increment-3 scope: single top surface,
+    vertical offsets only."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+
+    def colh(x):                                  # blocky height of column [x, x+1)
+        zc = top_z(verts, faces, xoff + x + 0.5, y0 + ny / 2.0)
+        assert zc is not None, f"column {x} not covered"
+        return max(1, round(zc - zbase))
+
+    high = [colh(i) for i in range(n_high)]       # boundary-first == plate order
+    low = [colh(-1 - i) for i in range(n_low)]
+    gh = D.gen_seam_x0_high_varying(high, low, ny=ny, ly0=ly0, lz0=lz0)
+    gl = D.gen_seam_x0_low_varying(low, high, ny=ny, ly0=ly0, lz0=lz0)
+
+    def vline(x, h_ref):
+        out = []
+        for j in range(ny + 1):
+            z = top_z(verts, faces, xoff + x, y0 + j)
+            dz = 0 if z is None else round((z - zbase - h_ref) * 84)
+            out.append(None if dz == 0 else (0, 0, dz))
+        return out
+
+    # HIGH plate x-lines: -1..n_high (cluster ci <-> line -1+i); h_ref per
+    # line = max adjacent plate column height (pair-max convention)
+    hplate = [low[0]] + high
+    vh = []
+    for i in range(len(hplate) + 1):
+        adj = [hplate[c] for c in (i - 1, i) if 0 <= c < len(hplate)]
+        vh += vline(-1 + i, max(adj))
+    lplate = list(reversed(low)) + [high[0]]
+    vl = []
+    for i in range(len(lplate) + 1):
+        adj = [lplate[c] for c in (i - 1, i) if 0 <= c < len(lplate)]
+        vl += vline(-n_low + i, max(adj))
+    return {(8, 8, 8): D.apply_seam_displacement(gh, vlist=vh),
+            (7, 8, 8): D.apply_seam_displacement(gl, vlist=vl)}
+
+
 # ── synthetic test geometry ──────────────────────────────────────────────────
 def plane_mesh(nx, ny, zfn, pad=1.0):
     """Triangulated graph surface z = zfn(x, y) over [-pad, nx+pad] x
@@ -171,7 +220,24 @@ def _selftest():
     want = D.gen_terrain(cz, 30, 10)
     assert set(got) == set(want) and all(got[k] == want[k] for k in got), \
         "terrain mismatch"
-    print("du_mesh selftest: 4/4 OK")
+    # 5) per-group vlist mode reconstructs 3081 (equivalent to its cluster map)
+    try:
+        from tests.archive.test_du_solid_seams import chunks
+        c81 = chunks(3081)
+        gh = D.gen_seam_x0_high_varying([2, 1], [2, 1])
+        # cluster V's expanded per-group: c0 TRI x3, c1 x3(+filler inherits), etc.
+        vh = ([(28, 0, -40)] * 3 + [(0, 0, -16)] * 3
+              + [(-28, 0, -40)] * 3 + [None] * 3)
+        assert D.apply_seam_displacement(gh, vlist=vh) == c81[(8, 8, 8)], \
+            "3081 vlist HIGH mismatch"
+    except FileNotFoundError:
+        pass
+    # 6) flat mesh across x=0 == undisplaced varying pair (no offsets emitted)
+    geom = plane_mesh(4, 2, lambda x, y: 1.0)
+    scans = gen_x0_from_mesh(geom, 2, 2, ny=2, xoff=2.0)
+    assert scans[(8, 8, 8)] == D.gen_seam_x0_high_varying([1, 1], [1, 1]), "x0 flat HIGH"
+    assert scans[(7, 8, 8)] == D.gen_seam_x0_low_varying([1, 1], [1, 1]), "x0 flat LOW"
+    print("du_mesh selftest: 6/6 OK")
 
 
 if __name__ == "__main__":

@@ -1977,14 +1977,29 @@ def gen_corner_xyz():
 # In 3081 displacement is PER-CLUSTER uniform: bevel clusters (+-28,0,-40),
 # hump-top interior (0,0,-16), far/h1 clusters neutral. The VALUE function
 # (DU's smoothing vertex solve) is the remaining unknown of this arc.
-def apply_seam_displacement(g, tri_T2=None, cluster_disp=None):
-    """Overlay per-cluster smooth displacement onto a generated seam chunk.
+def apply_seam_displacement(g, tri_T2=None, cluster_disp=None, vlist=None):
+    """Overlay smooth displacement onto a generated seam chunk.
     tri_T2: {cluster_idx: (dx,dy,dz)} written into TRI groups' T2 slot;
     cluster_disp: {cluster_idx: (dx,dy,dz)} applied to that cluster's flat
     groups (run>0 -> 12B expansion, filler -> in-place, run-0 row -> neutral).
-    Byte-exact: 3081 == overlay(gen_seam_x0_*_varying([2,1],[2,1]))."""
+    vlist: PER-GROUP mode instead -- a sequence indexed in FG walk order
+    (one entry per corner group; None = neutral). Filler groups do NOT
+    consume an index and inherit the preceding row's V (3081 behavior);
+    TRI groups consume an index (V -> T2 slot).
+    Byte-exact: 3081 == overlay(gen_seam_x0_*_varying([2,1],[2,1])) in both
+    modes (cluster map and the equivalent per-group vlist)."""
     enc = lambda d: (d + 126) % 256
     out = bytearray(); i = 0; cl = -1; started = False
+    gi = 0; last_v = None
+    def group_V(is_filler):
+        nonlocal gi, last_v
+        if vlist is not None:
+            if is_filler:
+                return last_v
+            v = vlist[gi] if gi < len(vlist) else None
+            gi += 1; last_v = v
+            return v
+        return None
     while i < len(g):
         if i+1 < len(g) and g[i] == 255 and g[i+1] == 0:
             n = 0
@@ -2002,16 +2017,24 @@ def apply_seam_displacement(g, tri_T2=None, cluster_disp=None):
         if is16:
             if not started: started = True; cl = 0
             grp = bytearray(g[i:i+16])
-            T2 = (tri_T2 or {}).get(cl)
+            T2 = group_V(False) if vlist is not None else (tri_T2 or {}).get(cl)
             if T2:
                 grp[11], grp[12], grp[13] = enc(T2[0]), enc(T2[1]), enc(T2[2])
             out += grp; i += 16
         elif is8:
             if not started: started = True; cl = 0
-            V = (cluster_disp or {}).get(cl)
-            if V is None or (g[i+2] == 0 and g[i] != 0):
-                out += g[i:i+8]                   # untouched / neutral run-0 row
-            elif g[i+2] == 0:                     # (0,0) filler: in-place
+            is_filler = g[i+2] == 0 and g[i] < 16
+            if vlist is not None:
+                V = group_V(is_filler)
+                if g[i+2] == 0 and not is_filler:
+                    V = None                      # run-0 content row: neutral
+            else:
+                V = (cluster_disp or {}).get(cl)
+                if V is not None and g[i+2] == 0 and not is_filler:
+                    V = None
+            if V is None:
+                out += g[i:i+8]
+            elif g[i+2] == 0:                     # filler: in-place
                 grp = bytearray(g[i:i+8])
                 grp[3], grp[4], grp[5] = enc(V[0]), enc(V[1]), enc(V[2])
                 out += grp
