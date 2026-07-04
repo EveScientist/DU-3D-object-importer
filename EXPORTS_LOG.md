@@ -211,6 +211,27 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   proven. ALL THREE center planes + grid seams + single chunks now render mesh-driven smooth
   surfaces correctly.**
 
+## Build AX — 4×4-chunk flat donor (3105, 2026-07-04)
+- **3105** = flat h1 plate X,Y∈[20.5,119.5], Z=10.5 (100×100 vox, 16 chunks cx/cy 8..11).
+  mcs: 533 (most), 592 (cy=11 row exc corner), 550 (cx=11 col), 609 ((11,11)).
+  gen_terrain_flat_grid(20,20,100,100): **6/16 byte-exact — ALL FOUR double-middles + x-low
+  middles PASS**; failures = edge families at never-probed scale (ny=13 / Rx=24 / Ry=24):
+  (a) (8,8,8) plain plate ny=13: 13 single pad-pair DELETIONS in FG (~1/cluster) → plate
+      cluster-gap likely shrinks at large ny (cf. z-code's 4−(ny≥6); plain-plate rule unprobed
+      beyond small ny);
+  (b) (9/10,8,8) gen_middle_x(32,ny=13) + (11,8,8) gen_seam_high(24,ny=13): periodic per-column
+      −2×2 deletions in the DECL region (period ~146) + same FG gap effect — the C1-family
+      pad-count question at scale;
+  (c) (11,9/10,8) gen_ymid_xhigh(Rx=24): ref +16B = one 4-pair pad run @~4550 + one at tail —
+      width-step formula (pre_b10 += 2*((Rx+1)//4), validated Rx≤6) under-counts at Rx=24;
+  (d) y-HIGH row (8..11,11,8) gen_seam_high_y(24,13,x_fwd_ghost)/gen_corner_middle(24)/
+      gen_corner_hh(24,24): STRUCTURAL — ref inserts whole per-column decl groups
+      (~129B each: val 0x5c + marker runs) got lacks + an 820B got-only block deleted +
+      FG replacements — the documented-unvalidated ybfs branch / Ry=24 decl-splice truncation.
+  PLAN: fix (a)→(b)→(c)→(d) one at a time against 3105 as oracle, gating each behind
+  size thresholds to keep 604/604 + 50/50 green; then wire 'grid' displacement region +
+  bumpy sine test (amplitude ≤±1.5 vox) using 3105 envelope/mcs.
+
 ## Multi-region composition probe (2026-07-04)
 - **tests/mesh_xy_tilt_0704_2019.blueprint** — displaced x=0+y=0 SURFACE CORNER: one tilted plane
   z=1−(2(x+2)+10(y+2))/84 over the 3079 footprint (all 25 corner lines distinct, 0..−48).
