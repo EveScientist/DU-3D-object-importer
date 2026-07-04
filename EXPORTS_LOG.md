@@ -229,7 +229,9 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
 - **tests/mesh_yz_tilt_0704_2027.blueprint** — displaced y=0+z=0 corner (3077 shape/donor, nx=3):
   tilt dz=−(6(x−10)+20(y+1)), 12 distinct corners, 0..−58. gen_yz_from_mesh. EXPECTED:
   continuous plane, gentle toward +x, strong toward +y, deepest (far-x, +y), no crack at y=0.
-  AWAITING DEPLOY. (Both: flat-mesh reductions == blocky gen_corner_xz/yz; selftest 11/11.)
+  (Both: flat-mesh reductions == blocky gen_corner_xz/yz; selftest 11/11.)
+  **BOTH DEPLOYED AS EXPECTED 2026-07-04 — xz and yz displaced corners hardware-proven. EVERY
+  probed carrier surface (plain/grid/x0/y0/z0/xy/xz/yz) now renders mesh displacement correctly.**
 
 ## 3-plane surface corner (2949 revisited 2026-07-04)
 - **2949** (archive; 2×2×2 origin box, 1 vox/octant, 8 chunks) — 3-PLANE SURFACE CORNER SOLVED
