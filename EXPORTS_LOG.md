@@ -231,6 +231,13 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   PLAN: fix (a)→(b)→(c)→(d) one at a time against 3105 as oracle, gating each behind
   size thresholds to keep 604/604 + 50/50 green; then wire 'grid' displacement region +
   bumpy sine test (amplitude ≤±1.5 vox) using 3105 envelope/mcs.
+  PROGRESS (2026-07-04, commits 987f170/ef4c678/fba47d7): **12/16 byte-exact — classes (a),(b),
+  (c) CLOSED**: (a) plate clgap band 12≤ny<32 → 2 pairs + L term; (b) middle_x/seam_high ny≥7
+  decl shrink + clgap band + pre −2/col (middle_x: nxd−1; seam_high: nxd, +2 tail); (c)
+  ymid_xhigh T = 158−5Rx+(Rx≥6)+2·((Rx+1)//12) (corner_hh-side fix was a dead end — the run
+  shrink normalizes it away; reverted). REMAINING class (d) = y-high row 4 chunks; analysis +
+  doubling hypothesis (264B/col decl period = both splice plates' groups interleaved per column
+  at large R; sub-block x-marker 0x5c formula TBD) in du-solid-deferred-checklist memory.
 
 ## Multi-region composition probe (2026-07-04)
 - **tests/mesh_xy_tilt_0704_2019.blueprint** — displaced x=0+y=0 SURFACE CORNER: one tilted plane
