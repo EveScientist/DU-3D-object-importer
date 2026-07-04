@@ -402,26 +402,29 @@ def gen_seam_high(R, ly0=10, lz0=10, h=1, ny=2, verts=None):
         return s[:t]
     s = bytearray(bytes([0, 255]) * dp_d)
     for xi in range(nxd):
-        if xi > 0: s += bytes([255, 0]) * 4
+        if xi > 0: s += bytes([255, 0]) * (4 - (ny >= 7))  # decl x-gap shrink (3105)
         for yi in range(ny):
             if xi == 0 and yi == 0: s += bytes([0, CVm2, 1, 2, h - 1, 0])
             elif yi == 0: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
             else: s += bytes([(34 - h) % 256, 1, 2, h - 1, 0])
-    pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + 2 * ((nxd - 4) // 4)  # + wide-plate floor-step (validated R=2,4,6 at ny=3)
+    pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + 2 * ((nxd - 4) // 4) \
+        - 2 * nxd * (ny >= 7)                             # (validated R=2,4,6 at ny=3; ny=13 by 3105: -2 per col incl lead)
     pre_nb = max(pre_nb, len(s))                          # don't truncate the last decl at large R (decl region overruns formula pre)
     s = pad_to(s, pre_nb)
     s += bytes([(120 - CVm2 - (h - 1) - 35 * (ny - 1) + 55 * (nxd - 1)) % 256, 0])
     fg0 = pre_nb + 110 + 2 * (dp_g - 59)
     s = pad_to(s, fg0)
     def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
+    sgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32))  # FG cluster gap (3105 band)
     s += grp(CVm1 + 19, h)
     for j in range(ny): s += grp(33 - h, h)
-    s += bytes([255, 0]) * 4
+    s += sgap
     for k in range(nxg):
         s += grp(164 - h - 35 * (ny - 1), h)
         for j in range(ny): s += grp(33 - h, h)
-        if k < nxg - 1: s += bytes([255, 0]) * 4
-    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * 8 + (322 - 10 * R) + 2 * ((nxd - 4) // 4)  # + wide-plate floor-step trailing
+        if k < nxg - 1: s += sgap
+    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32)) \
+        + (322 - 10 * R) + 2 * ((nxd - 4) // 4) - 4 * (12 <= ny < 32) - 2 * (ny >= 7)  # + wide-plate floor-step trailing
     s = bytearray(pad_to(s, Lnb - 2 * ny * bfs))
     if verts:                                             # post-patch FG groups -> displaced
         grps = [i for i in range(len(s) - 7) if s[i+1] == 1 and s[i+3] == 0x7e
@@ -463,12 +466,12 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
         return s[:t]
     s = bytearray(bytes([0, 255]) * dp_d)
     for xi in range(nxd):
-        if xi > 0: s += bytes([255, 0]) * 4
+        if xi > 0: s += bytes([255, 0]) * (4 - (ny >= 7))  # decl x-gap shrink (3105 ny=13: 3 pairs)
         for yi in range(ny):
             if xi == 0 and yi == 0: s += bytes([0, CVm2, 1, 2, h - 1, 0])
             elif yi == 0: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
             else: s += bytes([(34 - h) % 256, 1, 2, h - 1, 0])
-    pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + step
+    pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + step - 2 * (nxd - 1) * (ny >= 7)
     bumped = len(s) > pre_nb                              # decl region overruns the formula pre (higher ly0, larger dp_d)
     pre_nb = max(pre_nb, len(s))                          # -> don't truncate the last decl
     s = pad_to(s, pre_nb)
@@ -476,7 +479,7 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
     fg0 = pre_nb + 110 + 2 * (dp_g - 59)
     s = pad_to(s, fg0)
     def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
-    clgap = bytes([255, 0]) * (4 - (ny >= 6))             # FG cluster gap shrinks 8B->6B at ny>=6 (matches gen_heightmap)
+    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32))  # FG cluster gap (banded 2nd shrink, matches gen_heightmap)
     s += grp(CVm1 + 19, h)
     for j in range(ny): s += grp(33 - h, h)
     s += clgap
@@ -484,7 +487,8 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
         s += grp(164 - h - 35 * (ny - 1), h)
         for j in range(ny): s += grp(33 - h, h)
         if k < nxg - 1: s += clgap
-    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6)) + (322 - 10 * R) + step - 10 - 4 * bumped
+    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32)) \
+        + (322 - 10 * R) + step - 10 - 4 * bumped - 4 * (12 <= ny < 32)
     s = bytearray(pad_to(s, Lnb))
     if verts:                                             # post-patch FG groups -> displaced (same as gen_seam_high)
         grps = [i for i in range(len(s) - 7) if s[i+1] == 1 and s[i+3] == 0x7e
