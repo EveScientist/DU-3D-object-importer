@@ -176,6 +176,13 @@ for _num, _hc, _ho, _lc, _lo in [
     CASES.append((f"x0_varying_{_num}", _t))
 
 
+@case("x0_varying_3060_ny3_hump")
+def _(num=3060):
+    c = chunks(num)
+    assert D.gen_seam_x0_high_varying([2, 1], [2, 1], ny=3) == c[HIGH_X], "HIGH"
+    assert D.gen_seam_x0_low_varying([2, 1], [2, 1], ny=3) == c[LOW_X], "LOW"
+
+
 @case("x0_varying_reduces_to_uniform")
 def _():
     for nr, h in [(2, 1), (3, 1), (2, 2), (2, 3)]:

@@ -1521,7 +1521,9 @@ def _last_decl_end(s):
 #   * decl-third (3042 h3 flip): 3050 has h3 cols yet ALL decl thirds stay 2
 #     -> the flip keys on the BOUNDARY WINDOW's min height (own pair + opp
 #     pair), not the max. max(2, wmin) fits 3040/3042/3050; provisional.
-# UNVALIDATED: ny > 2 (middle-row +42 assignment), h >= 4, n_real >= 4.
+# ny=3 VALIDATED (3060): HIGH TRI middles = +42 each, LOW TRI middles =
+# filler'd flat each, head block gains one 33-marker per extra row (full
+# ny-entry column decl group). UNVALIDATED: h >= 4, n_real >= 4, ny >= 4.
 def _x0_tri16(val, run, dz, hc, side):
     """16-byte three-vertex transition group. h-2 slot: s2 for HIGH, s1 for LOW."""
     T = bytes([0x7e, 0x7e, 0x7e]); T1 = bytes([0x7e, 0x7e, (0x7e + dz) % 256])
@@ -1621,7 +1623,12 @@ def gen_seam_x0_high_varying(cols, opp, ny=2, ly0=10, lz0=10):
     wmin = min(cols[0], cols[1], opp[0], opp[1])      # decl-third window (provisional)
     d2 = max(2, wmin)
     cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
-    block = bytes([0, 255, 0, cvm2, 1, d2, hB - 1, 0, (33 - (hB - 1)) % 256, 1, d2, hB - 1])
+    # block = full ny-entry column decl group of the hB ghost-ghost column
+    # (one 33-marker per row beyond the first -- pinned by ny=3 build 3060);
+    # its final trailing 0 is supplied by the plate's leading pad byte.
+    block = bytes([0, 255, 0, cvm2, 1, d2, hB - 1, 0]) \
+        + bytes([(33 - (hB - 1)) % 256, 1, d2, hB - 1, 0]) * (ny - 1)
+    block = block[:-1]
     fd = _first_decl(g)
     xmark = (200 - hB - 35 * (ny - 1)) % 256
     out = block + g[:fd - 4] + bytes([xmark]) + g[fd + 1:]
