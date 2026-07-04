@@ -99,6 +99,31 @@ def gen_from_mesh(obj_path_or_geom, nx, ny, x0=0.0, y0=0.0, zbase=0.0,
     return D.gen_surface_displaced(H, vlist, lx0=lx0, ly0=ly0, lz0=lz0)
 
 
+def gen_terrain_from_mesh(obj_path_or_geom, nx, ny, gx, gy, x0=0.0, y0=0.0,
+                          zbase=0.0, h=1, lz0=10):
+    """Mesh -> displaced MULTI-CHUNK terrain via gen_terrain (splits across
+    positive chunk-grid boundaries, <=1 per axis; uniform blocky height h).
+    Returns {(cx,cy,cz): scan}. The mesh's cell-center heights must all round
+    to h (asserted) -- varying blocky H across grid seams is a later increment."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+    corner_z = []
+    for i in range(nx + 1):
+        line = []
+        for j in range(ny + 1):
+            z = top_z(verts, faces, x0 + i, y0 + j)
+            line.append(0 if z is None else round((z - zbase - h) * 84))
+        corner_z.append(line)
+    for i in range(nx):
+        for j in range(ny):
+            zc = top_z(verts, faces, x0 + i + 0.5, y0 + j + 0.5)
+            assert zc is not None and max(1, round(zc - zbase)) == h, \
+                f"cell ({i},{j}) blocky height != h (increment-2 scope)"
+    return D.gen_terrain(corner_z, gx, gy, lz0=lz0, h=h)
+
+
 # ── synthetic test geometry ──────────────────────────────────────────────────
 def plane_mesh(nx, ny, zfn, pad=1.0):
     """Triangulated graph surface z = zfn(x, y) over [-pad, nx+pad] x
@@ -139,7 +164,14 @@ def _selftest():
     got = gen_from_mesh(geom, 3, 2)
     want = D.gen_heightmap_unified([[1] * 2] * 3)
     assert got == want, "flat mismatch"
-    print("du_mesh selftest: 3/3 OK")
+    # 4) multi-chunk: boundary-spanning ramp == gen_terrain with the same grid
+    geom = plane_mesh(4, 2, lambda x, y: 1.0 - x / 8.0)
+    got = gen_terrain_from_mesh(geom, 4, 2, gx=30, gy=10)
+    cz = [[round((-x / 8.0) * 84)] * 3 for x in range(5)]
+    want = D.gen_terrain(cz, 30, 10)
+    assert set(got) == set(want) and all(got[k] == want[k] for k in got), \
+        "terrain mismatch"
+    print("du_mesh selftest: 4/4 OK")
 
 
 if __name__ == "__main__":

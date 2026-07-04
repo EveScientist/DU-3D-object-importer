@@ -115,7 +115,14 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
   from donor 2700 (same all-1 blocky H; mc displacement-invariant). Round-trip verified. Solver
   offline-validated: reproduces gen_linear_ramp (2700), the diagonal tilt, and plain flat plates
   byte-exactly from synthetic meshes. EXPECTED: 4-vox strip at the 2700 position whose top is a
-  smooth cosine valley — full height at the ends, half-voxel dip center, no steps. AWAITING DEPLOY.
+  smooth cosine valley — full height at the ends, half-voxel dip center, no steps.
+  **DEPLOYED PERFECTLY 2026-07-04 — the mesh→solver→encoder→assembler path is hardware-proven.**
+- **tests/mesh_span_wave_0704_1439.blueprint** (2026-07-04) — increment 2: the same cosine valley
+  SPANNING a chunk-grid boundary via mesh→gen_terrain_from_mesh (4×2 patch @gx=30,gy=10; the −42
+  dip line sits exactly ON the boundary, forcing shared ghost-line offsets). Donor 2669 (= flat
+  gen_terrain(30,10,4,2)); mcs {(8,8,8):756,(9,8,8):587}; round-trip verified. Selftest 4/4 (adds
+  boundary-spanning ramp == gen_terrain byte-exact). EXPECTED: 4×2 plate, one continuous smooth
+  valley across the boundary, NO crack or step. AWAITING DEPLOY.
 - **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
   across x=0 (LOW [2,1] / HIGH [2,1,1] boundary-first; TRI transition clusters BOTH chunks —
   first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying
