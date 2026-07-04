@@ -1533,6 +1533,29 @@ def _x0_tri16(val, run, dz, hc, side):
     return bytes([val, 1, run]) + T + b'\0' + T1 + bytes([s]) + T + b'\0\0'
 
 
+def _parse_fg_clusters(g):
+    """Parse the FG region: clusters of 8B flat groups separated by [255,0]
+    runs. Returns (fg0, clusters, gap pad-pair counts, trailing-bytes offset)."""
+    f0 = _fg0(g)
+    i = f0; clusters = []; gaps = []; cur = []; end = f0
+    while i < len(g) - 7:
+        if g[i+1] == 1 and g[i+3] == 0x7e and g[i+4] == 0x7e and g[i+5] == 0x7e and g[i+7] == 0:
+            cur.append(bytes(g[i:i+8])); i += 8
+        elif g[i] == 255 and g[i+1] == 0:
+            n = 0
+            while i < len(g) - 1 and g[i] == 255 and g[i+1] == 0:
+                n += 1; i += 2
+            if cur:
+                clusters.append(cur); cur = []; gaps.append(n)
+            end = i
+        else:
+            break
+    if cur:
+        clusters.append(cur); gaps.append(0); end = i
+    trail_at = end - 2 * gaps[-1] if gaps else end   # trailing pad = last gap + rest
+    return f0, clusters, gaps, trail_at
+
+
 def _x0_rebuild_fg(g, plate, ny, side, tri, hB=None):
     """Rewrite the FG region of plain varying plate g (heights `plate`, incl the
     ghost col: first for side='high', last for side='low') into seam form:
@@ -1552,24 +1575,7 @@ def _x0_rebuild_fg(g, plate, ny, side, tri, hB=None):
         d0 = plate[0] - max(hB, plate[0])                 # negative height delta
         hc[0] = max(hB, plate[0])
     ghost_ci, far_ci = (0, nx) if side == 'high' else (nx, 0)
-    f0 = _fg0(g)
-    # parse: clusters of 8B flat groups separated by [255,0] runs; keep gaps/trailing
-    i = f0; clusters = []; gaps = []; cur = []
-    while i < len(g) - 7:
-        if g[i+1] == 1 and g[i+3] == 0x7e and g[i+4] == 0x7e and g[i+5] == 0x7e and g[i+7] == 0:
-            cur.append(bytes(g[i:i+8])); i += 8
-        elif g[i] == 255 and g[i+1] == 0:
-            n = 0
-            while i < len(g) - 1 and g[i] == 255 and g[i+1] == 0:
-                n += 1; i += 2
-            if cur:
-                clusters.append(cur); cur = []; gaps.append(n)
-            end = i
-        else:
-            break
-    if cur:
-        clusters.append(cur); gaps.append(0); end = i
-    trail_at = end - 2 * gaps[-1] if gaps else end   # trailing pad = last gap + rest
+    f0, clusters, gaps, trail_at = _parse_fg_clusters(g)
     assert len(clusters) == nx + 1, (len(clusters), nx)
     fg = bytearray()
     for ci, cl in enumerate(clusters):
@@ -1659,6 +1665,98 @@ def gen_seam_x0_low_varying(cols, opp, ny=2, ly0=10, lz0=10):
         del g[de+2:de+4]                              # ... absorbed after decl run
         g = bytes(g)
     return g
+
+
+# ── y=0 seam with VARYING per-row height ──────────────────────────────────────
+# Derived from 3062 (hump 1,2|2,1 across y=0) = the TRANSPOSE of the x=0
+# varying rules. y=0 clusters run per-X (rows inside), and the seam-adjacent
+# element within each cluster is the OPENER for HIGH (ghost row first) / the
+# GHOST ROW for LOW (last). The 16B transition form (same byte layout as x=0,
+# T1 offset still in the Z slot -- displacement is vertical) lands on that
+# element, with the x-END/x-MIDDLE pattern transposed from x=0's y-ends/
+# y-middles: HIGH openers get dz +14 at x-edge clusters, +42 at x-interior;
+# LOW ghost rows get +14 at x-edge clusters and the plain filler form at
+# x-interior. Fillers stay confined to x-INTERIOR clusters (uniform 3044
+# rule) with per-row gates: HIGH rows (last exempt) two-sided neighbor rule
+# like x=0 (prev>=own AND next>=own, row0's prev = across-boundary = own);
+# LOW rows gate one-sided toward the seam (next(+y) >= own -- pinned by 3062
+# LOW row1 whose -y neighbor is LOWER yet fillers anyway; two-sided is
+# REJECTED there, an x=0/y=0 asymmetry). TRI trigger transposes directly:
+# opp[0] > opp[1] (neighbor descends away). HIGH decls = varying (rows+2)-
+# plate @ly0=-2 with profile [hB=h(-y1.5), ghost]+rows (the -35/ly0 shift in
+# 3062's decl vals 119/94 pins the hB rule transposing too). VALIDATED at
+# nx=2, h<=2, ny=2 rows/side; s-slot at h>=3 assumed x=0-analogous (unprobed);
+# no decl-third flip (x=0-specific per 3046); LOW CV<=160 band unprobed.
+def _y0_rebuild_fg(g, prof, nx, side, tri):
+    """Rewrite the FG of plain varying y-plate g (y-profile `prof` incl ghost
+    row: first for side='high', last for side='low') into y=0 seam form."""
+    ny = len(prof)
+    f0, clusters, gaps, trail_at = _parse_fg_clusters(g)
+    assert len(clusters) == nx + 1, (len(clusters), nx)
+    fg = bytearray()
+    for ci, cl in enumerate(clusters):
+        assert len(cl) == ny + 1, (ci, len(cl))
+        edge = ci in (0, nx)
+        op = cl[0]
+        if side == 'high':
+            if tri:
+                fg += _x0_tri16(op[0], op[2], 14 if edge else 42, prof[0], side)
+            elif not edge and prof[0] >= 2:
+                g2 = bytearray(op); g2[2] = 0; g2[6] = 0
+                fg += bytes(g2) + _zgrp(prof[0] - 2, 0)
+            else:
+                fg += op
+            for j, grp in enumerate(cl[1:]):
+                h = prof[j]
+                prev_h = prof[j-1] if j > 0 else h
+                next_h = prof[j+1] if j < ny - 1 else h
+                if j < ny - 1 and not edge and h >= 2 and prev_h >= h and next_h >= h:
+                    g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
+                    fg += bytes(g2) + _zgrp(h - 2, 0)
+                else:
+                    fg += grp
+        else:
+            fg += op
+            for j, grp in enumerate(cl[1:]):
+                h = prof[j]
+                next_h = prof[j+1] if j < ny - 1 else h
+                if j == ny - 1 and tri and edge:
+                    fg += _x0_tri16(grp[0], grp[2], 14, h, side)
+                elif not edge and h >= 2 and next_h >= h:
+                    g2 = bytearray(grp); g2[2] = 0; g2[6] = 0
+                    fg += bytes(g2) + _zgrp(h - 2, 0)
+                else:
+                    fg += grp
+        if ci < nx:
+            fg += bytes([255, 0]) * gaps[ci]
+    return g[:f0] + bytes(fg) + g[trail_at:]
+
+
+def gen_seam_y0_high_varying(rows, opp, nx=2, lx0=10, lz0=10):
+    """+Y chunk (cy=8) of a y=0 seam with per-row heights. rows = own real row
+    heights boundary-first [h(+0.5), h(+1.5), ...]; opp = the -Y side's,
+    boundary-first (opp[0] = ghost row height, opp[1] = decl parameter hB).
+    Byte-exact vs 3062 HIGH; reduces to gen_seam_y0_high for uniform input."""
+    assert len(rows) >= 2 and len(opp) >= 2
+    ghost, hB = opp[0], opp[1]
+    prof = [ghost] + list(rows)
+    gB = gen_heightmap_unified([[hB] + prof] * nx, lx0=lx0, ly0=-2, lz0=lz0)
+    gA = gen_heightmap_unified([prof] * nx, lx0=lx0, ly0=-1, lz0=lz0)
+    fA = _fg0(gA)                                     # before rebuild: TRI breaks _fg0
+    gA = _y0_rebuild_fg(gA, prof, nx, 'high', tri=opp[0] > opp[1])
+    return (gB[:_fg0(gB)] + gA[fA:])[:-2]
+
+
+def gen_seam_y0_low_varying(rows, opp, nx=2, lx0=10, lz0=10):
+    """-Y chunk (cy=7) of a y=0 seam with per-row heights. rows = own real row
+    heights boundary-first [h(-0.5), h(-1.5), ...]; opp = the +Y side's
+    (opp[0] = ghost row height). Plain varying plate at ly0 = 32-n_real + FG
+    rewrite. Byte-exact vs 3062 LOW; reduces to gen_seam_y0_low uniform."""
+    assert len(rows) >= 2 and len(opp) >= 2
+    n_real = len(rows)
+    prof = list(reversed(rows)) + [opp[0]]
+    g = gen_heightmap_unified([prof] * nx, lx0=lx0, ly0=32 - n_real, lz0=lz0)
+    return _y0_rebuild_fg(g, prof, nx, 'low', tri=opp[0] > opp[1])
 
 
 def gen_corner_hh(Rx, Ry, lz0=10, h=1, verts=None):
