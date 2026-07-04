@@ -1909,6 +1909,46 @@ def gen_corner_yz(nx, depth=2, lx0=10):
     return out
 
 
+# ── x=0 + y=0 SURFACE CORNER (B3) ────────────────────────────────────────────
+# Derived 2026-07-04 from 3079 (4x4x1 slab straddling x=0 AND y=0, h=1).
+# The cleanest corner of the three:
+#   (8,8,8) = gen_corner_hh(rx, ry) BYTE-EXACT -- the terrain-grid 2-axis
+#             corner form IS the octant xy corner (unified seam principle:
+#             decls from the (+2,+2)-plate @(-2,-2), FG from (+1,+1)@(-1,-1)).
+#   (7,7,8) = PURE plain (rx+1)x(ry+1) plate @(32-rx, 32-ry). NOTE: its CV is
+#             inside the x0-low band (<=160) yet NO band shift -- the x0 CV
+#             band shift does not operate in xy-corner chunks.
+#   (7,8,8) = the y0-high decl splice @lx0=32-rx WITHOUT the pure-y0 seam's
+#             -2 tail trim.
+#   (8,7,8) = plain (rx+1)x(ry+1) plate @(-1, 32-ry) + the x0-high head in its
+#             UNIFIED placement: the full ghost-column decl group (5*(ry+1)
+#             bytes) inserted at first_decl-10, one pad pair dropped after it,
+#             first-decl value -> x-marker. (Verified byte-equivalent to the
+#             existing gen_seam_x0_high block construction on 3048/3060.)
+def gen_corner_xy(rx=2, ry=2, lz0=10):
+    """All 4 chunks of an x=0+y=0 surface corner as {(cx,cy,cz): scan}. rx/ry =
+    real cols/rows per side, h=1 single layer. Byte-exact vs 3079 (rx=ry=2);
+    other sizes follow the constituent generators' validated ranges but the
+    corner composition itself is single-build-pinned."""
+    ny = ry + 1
+    out = {(8, 8, 8): gen_corner_hh(rx, ry, lz0=lz0)}
+    out[(7, 7, 8)] = gen_heightmap_unified(
+        [[1] * ny] * (rx + 1), lx0=32 - rx, ly0=32 - ry, lz0=lz0)
+    gB = gen_heightmap_unified([[1] * (ry + 2)] * (rx + 1), lx0=32 - rx, ly0=-2, lz0=lz0)
+    gA = gen_heightmap_unified([[1] * ny] * (rx + 1), lx0=32 - rx, ly0=-1, lz0=lz0)
+    out[(7, 8, 8)] = gB[:_fg0(gB)] + gA[_fg0(gA):]     # no -2 tail trim here
+    g = gen_heightmap_unified([[1] * ny] * (rx + 1), lx0=-1, ly0=32 - ry, lz0=lz0)
+    cvm2 = (217 - 55 * (-2) + 35 * (32 - ry) + lz0) % 256
+    ins = bytes([cvm2, 1, 2, 0, 0]) + bytes([33, 1, 2, 0, 0]) * (ny - 1)
+    fd = _first_decl(g)
+    g2 = bytearray(g)
+    g2[fd] = (200 - 1 - 35 * (ny - 1)) % 256           # x-marker
+    g2[fd - 10:fd - 10] = ins
+    del g2[fd - 10 + len(ins):fd - 8 + len(ins)]       # drop one pad pair after block
+    out[(8, 7, 8)] = bytes(g2)
+    return out
+
+
 def gen_corner_hh(Rx, Ry, lz0=10, h=1, verts=None):
     """The HIGH-x HIGH-y chunk of a 2-axis (x & y) corner: Rx real cols, Ry real
     rows, with back-ghosts on BOTH axes. Decls from an (Rx+2)x(Ry+2) plate @(-2,-2);

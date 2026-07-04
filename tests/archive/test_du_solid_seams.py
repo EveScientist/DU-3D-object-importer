@@ -265,6 +265,13 @@ def _(num=3077):
         assert scan == c[key], f"{key}"
 
 
+@case("xy_corner_3079_2x2")
+def _(num=3079):
+    c = chunks(num)
+    for key, scan in D.gen_corner_xy(2, 2).items():
+        assert scan == c[key], f"{key}"
+
+
 def main():
     passed = failed = 0
     for name, fn in CASES:
