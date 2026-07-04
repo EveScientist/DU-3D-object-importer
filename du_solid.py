@@ -1504,18 +1504,24 @@ def _last_decl_end(s):
 #     (h-2 slot position is SIDE-DEPENDENT -- pinned by 3050 h3; at h2 all
 #     s-slots are 0 and 3048 couldn't distinguish. Memory's "final byte=h-2"
 #     was the wrong slot.)
-#   * TRI trigger: the OPPOSITE side's boundary column pair steps
-#     (opp[0] != opp[1]) -- the transition geometry lives in the chunk ACROSS
-#     the seam from the step. Pinned by one-sided build 3056 (1,1|2,1): HIGH
-#     (own pair steps) came back completely PLAIN while LOW (own side flat)
-#     carried the TRI ghost cluster; the own-pair hypothesis predicted the
-#     exact inverse. 3048/3050 (both sides step -> both TRI) and 3052/3054
-#     (no step 1-out -> none) fit too.
+#   * TRI trigger: the OPPOSITE side's boundary pair DESCENDS away across
+#     the seam (opp[0] > opp[1]) -- the chunk renders the backside slope of
+#     the neighbor's drop-off. Direction pinned by valley 3058 (1,2|2,1:
+#     opp pairs ASCEND away -> NO transition geometry at all, both chunks);
+#     side pinned by one-sided 3056 (1,1|2,1: HIGH with own-pair step came
+#     back plain, LOW with the opposite-side step carried the TRI cluster --
+#     exact inverse of the own-pair hypothesis). 3048/3050 (both descend ->
+#     both TRI) and 3052/3054 (no 1-out step -> none) fit.
+#   * HIGH's ghost EDGE cluster is really the interior-pair cluster of the
+#     TWO across-boundary columns: height = max(hB, ghost), not ghost
+#     (pinned by 3058: h2 cluster over a h1 ghost col whose decl stays d0;
+#     next opener shifts with it via the 129 - prev_cluster_h chain). The
+#     hump refs masked this (max == ghost there). LOW has NO mirror rule --
+#     3058 LOW is byte-exact plain (outer across-boundary col ignored).
 #   * decl-third (3042 h3 flip): 3050 has h3 cols yet ALL decl thirds stay 2
 #     -> the flip keys on the BOUNDARY WINDOW's min height (own pair + opp
 #     pair), not the max. max(2, wmin) fits 3040/3042/3050; provisional.
-# UNVALIDATED: ny > 2 (middle-row +42 assignment), dz sign for steps UP
-# toward the seam (valley at the boundary), h >= 4, n_real >= 4.
+# UNVALIDATED: ny > 2 (middle-row +42 assignment), h >= 4, n_real >= 4.
 def _x0_tri16(val, run, dz, hc, side):
     """16-byte three-vertex transition group. h-2 slot: s2 for HIGH, s1 for LOW."""
     T = bytes([0x7e, 0x7e, 0x7e]); T1 = bytes([0x7e, 0x7e, (0x7e + dz) % 256])
@@ -1525,15 +1531,24 @@ def _x0_tri16(val, run, dz, hc, side):
     return bytes([val, 1, run]) + T + b'\0' + T1 + bytes([s]) + T + b'\0\0'
 
 
-def _x0_rebuild_fg(g, plate, ny, side, tri):
+def _x0_rebuild_fg(g, plate, ny, side, tri, hB=None):
     """Rewrite the FG region of plain varying plate g (heights `plate`, incl the
     ghost col: first for side='high', last for side='low') into seam form:
     per-cluster fillers by the neighbor rule + optional 16B ghost cluster.
     Cluster values/pads are taken from g; runs are rebuilt as the cluster
     height hc (= own col for edge clusters, max of the adjacent pair for
-    interior ones) -- matches every observed group."""
+    interior ones) -- matches every observed group. For side='high', hB
+    (the x=-1.5 col across the boundary) raises the ghost EDGE cluster to
+    max(hB, ghost): it is really the interior-pair cluster of the two
+    across-boundary columns (pinned by valley 3058, where it renders h2 over
+    a h1 ghost; the next opener shifts by the same delta via the 129-prev_h
+    chain). LOW ignores its outer across-boundary column (3058 LOW is plain)."""
     nx = len(plate)
     hc = [plate[0]] + [max(plate[i-1], plate[i]) for i in range(1, nx)] + [plate[-1]]
+    d0 = 0
+    if side == 'high' and hB is not None and hB > plate[0]:
+        d0 = plate[0] - max(hB, plate[0])                 # negative height delta
+        hc[0] = max(hB, plate[0])
     ghost_ci, far_ci = (0, nx) if side == 'high' else (nx, 0)
     f0 = _fg0(g)
     # parse: clusters of 8B flat groups separated by [255,0] runs; keep gaps/trailing
@@ -1560,6 +1575,11 @@ def _x0_rebuild_fg(g, plate, ny, side, tri):
         vals = [cl[0][0]] + [grp[0] for grp in cl[1:]
                              if not (grp[0] < 16 and grp[2] == 0 and grp[6] == 0)]
         assert len(vals) == ny + 1, (ci, vals)
+        if d0:                                            # ghost-edge cluster raised to hc[0]
+            if ci == 0:
+                vals[1:] = [(v + d0) % 256 for v in vals[1:]]
+            elif ci == 1:
+                vals[0] = (vals[0] + d0) % 256            # opener follows 129-prev_h chain
         prev_h = hc[ci-1] if ci > 0 else h
         next_h = hc[ci+1] if ci < nx else h
         filler = ci != far_ci and h >= 2 and prev_h >= h and next_h >= h
@@ -1597,7 +1617,7 @@ def gen_seam_x0_high_varying(cols, opp, ny=2, ly0=10, lz0=10):
     ghost, hB = opp[0], opp[1]
     plate = [ghost] + list(cols)
     g = gen_heightmap_unified([[h] * ny for h in plate], lx0=-1, ly0=ly0, lz0=lz0)
-    g = _x0_rebuild_fg(g, plate, ny, 'high', tri=opp[0] != opp[1])
+    g = _x0_rebuild_fg(g, plate, ny, 'high', tri=opp[0] > opp[1], hB=hB)
     wmin = min(cols[0], cols[1], opp[0], opp[1])      # decl-third window (provisional)
     d2 = max(2, wmin)
     cvm2 = (217 - 55 * (-2) + 35 * ly0 + lz0) % 256
@@ -1619,7 +1639,7 @@ def gen_seam_x0_low_varying(cols, opp, ny=2, ly0=10, lz0=10):
     n_real = len(cols); lx0 = 32 - n_real
     plate = list(reversed(cols)) + [opp[0]]
     g = gen_heightmap_unified([[h] * ny for h in plate], lx0=lx0, ly0=ly0, lz0=lz0)
-    g = _x0_rebuild_fg(g, plate, ny, 'low', tri=opp[0] != opp[1])
+    g = _x0_rebuild_fg(g, plate, ny, 'low', tri=opp[0] > opp[1])
     wmin = min(cols[0], cols[1], opp[0], opp[1])
     g = _seam_x0_decl_third(g, wmin)
     CV = (217 - 55 * lx0 + 35 * ly0 + lz0) % 256
