@@ -129,7 +129,19 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
   + apply_seam_displacement per-group vlist mode (new; fillers inherit preceding row's V, run-0
   rows neutral). Donor 3032 (uniform x0 pair); mcs {(8,8,8):587,(7,8,8):756}; round-trip verified;
   selftest 6/6 (adds 3081-vlist equivalence + flat-across-x0 reduction). EXPECTED: 4×2 plate
-  straddling x=0, smooth half-voxel dip AT the octant boundary, no crack. AWAITING DEPLOY.
+  straddling x=0, smooth half-voxel dip AT the octant boundary, no crack.
+  **DEPLOYED 2026-07-04: rendered a HILL (center 0, edges −42) — NOT a mapping bug: the TEST MESH
+  had a cosine PHASE ERROR (cos(π(x−2)/2) peaks at the seam). DU rendered the buggy mesh
+  faithfully; solver + mapping were correct all along (user caught it: "check your file").**
+- **tests/mesh_x0_ramp_diag_0704_1452.blueprint** (2026-07-04) — diagnostic ramp across x=0,
+  distinct offset per corner line. **RENDERED PERFECTLY 2026-07-04: smooth wedge X −1.5→+1.5,
+  depths exactly 0/−21/−42/−63/−84 left→right, no crack at the octant seam — the x0 MESH PATH
+  (cluster→line mapping, carriers, ghost-line consistency) is HARDWARE-PROVEN. (Also falsified
+  the interim "mirrored mapping" hypothesis — a symmetric hill is the value-mirror of a valley.)**
+- **tests/mesh_x0_valley_fixed_0704_1500.blueprint** (2026-07-04) — the intended valley with the
+  phase FIXED (0.75 − 0.25·cos): line offsets 0/−21/−42/−21/0, dip AT x=0. Donor 3032; round-trip
+  verified. EXPECTED: smooth half-voxel dip at the octant boundary rising to full height at ±2.
+  AWAITING DEPLOY (optional confirmation — the ramp already proves the path).
 - **tests/x0_varying_tri_import_0704_0952.blueprint** (2026-07-04) — NOVEL asymmetric-width hump
   across x=0 (LOW [2,1] / HIGH [2,1,1] boundary-first; TRI transition clusters BOTH chunks —
   first in-game exercise of generated 16-byte three-vertex groups). (8,8,8)=gen_seam_x0_high_varying
