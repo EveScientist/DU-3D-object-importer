@@ -2271,6 +2271,54 @@ def _grid_body(gx, gy, nx, ny, lz0, h):
     return out
 
 
+def gen_terrain_grid(corner_z, gx, gy, lz0=10, h=1):
+    """DISPLACED multi-boundary grid: the smooth analog of gen_terrain_flat_grid.
+    corner_z = global (nx+1)x(ny+1) grid of top-vertex z-offsets (84-steps);
+    gx,gy = footprint low-corner global voxel coords. Routes each chunk its slice
+    of the global corner grid (ghost-overlap ranges generalize gen_terrain's
+    validated 2-chunk slices: x-low [0:nL+2], x-mid_j [nL+32j-2:nL+32j+33],
+    x-high [nx-Rx-1:nx+1]; y symmetric). Adjacent chunks share overlap lines ->
+    continuity by construction. corner_z all-zero reduces to gen_terrain_flat_grid
+    byte-exact. Returns {(cx,cy,cz): scan}."""
+    nx = len(corner_z) - 1; ny = len(corner_z[0]) - 1
+    bx = 32 * ((gx // 32) + 1); by = 32 * ((gy // 32) + 1)
+    cxl, cyl = 8 + gx // 32, 8 + gy // 32
+    cxh = 8 + (gx + nx - 1) // 32; cyh = 8 + (gy + ny - 1) // 32
+    lx, ly = gx % 32, gy % 32; cz = 8 + lz0 // 32
+    nL = bx - gx; Rx = (gx + nx) - 32 * ((gx + nx - 1) // 32)
+    nLy = by - gy; Ry = (gy + ny) - 32 * ((gy + ny - 1) // 32)
+    Mx = cxh - cxl - 1; My = cyh - cyl - 1
+    XS = {'low': (0, nL + 2), 'high': (nx - Rx - 1, nx + 1)}      # x-line ranges
+    YS = {'low': (0, nLy + 2), 'high': (ny - Ry - 1, ny + 1)}     # y-line ranges
+    xmid = lambda j: (nL + 32 * j - 2, nL + 32 * j + 33)
+    ymid = lambda i: (nLy + 32 * i - 2, nLy + 32 * i + 33)
+    def V(xr, yr):                                                # verts slice, x-outer/y-inner
+        return _vts2d([corner_z[xi][yr[0]:yr[1]] for xi in range(xr[0], xr[1])])
+    out = {}
+    # y-low row
+    out[(cxl, cyl, cz)] = gen_surface_displaced([[h] * (nLy + 1)] * (nL + 1),
+                                                V(XS['low'], YS['low']), lx0=lx, ly0=ly, lz0=lz0)
+    for j in range(Mx):
+        out[(cxl + 1 + j, cyl, cz)] = gen_middle_x(32, ly0=ly, lz0=lz0, h=h, ny=nLy + 1,
+                                                   verts=V(xmid(j), YS['low']))
+    out[(cxh, cyl, cz)] = gen_seam_high(Rx, ly0=ly, lz0=lz0, h=h, ny=nLy + 1,
+                                        verts=V(XS['high'], YS['low']))
+    # y-middle row(s)
+    for iy in range(My):
+        cy = cyl + 1 + iy
+        out[(cxl, cy, cz)] = gen_ymid_xlow(nL, lx0=lx, lz0=lz0, h=h, verts=V(XS['low'], ymid(iy)))
+        for j in range(Mx):
+            out[(cxl + 1 + j, cy, cz)] = gen_double_middle(lz0=lz0, h=h, verts=V(xmid(j), ymid(iy)))
+        out[(cxh, cy, cz)] = gen_ymid_xhigh(Rx, lz0=lz0, h=h, verts=V(XS['high'], ymid(iy)))
+    # y-high row
+    out[(cxl, cyh, cz)] = gen_seam_high_y(Ry, nL + 1, lx0=lx, lz0=lz0, h=h, x_fwd_ghost=True,
+                                          verts=V(XS['low'], YS['high']))
+    for j in range(Mx):
+        out[(cxl + 1 + j, cyh, cz)] = gen_corner_middle(Ry, lz0=lz0, h=h, verts=V(xmid(j), YS['high']))
+    out[(cxh, cyh, cz)] = gen_corner_hh(Rx, Ry, lz0=lz0, h=h, verts=V(XS['high'], YS['high']))
+    return out
+
+
 def _mc_from_scan(s):
     """mc = 512 + pre byte (the lone non-bg byte between last decl and first FG group)."""
     decls = []; i = 0; fg0 = None

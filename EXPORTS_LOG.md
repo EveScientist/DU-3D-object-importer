@@ -108,6 +108,19 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 - (none)
 
 ## Generated import tests
+- **tests/grid_tilt_0705_1805.blueprint** (2026-07-05) — FIRST LARGE bumpy landscape: 100×100-vox
+  (4×4-chunk) displaced plate, asymmetric diagonal tilt dz84=−round(0.4x+0.8y) (0..−120). First
+  exercise of per-corner displacement through the GRID-INTERIOR generators (gen_middle_x/
+  gen_double_middle/gen_ymid_xlow/xhigh/gen_corner_middle verts= paths, validated only tiny before).
+  NEW du_solid.gen_terrain_grid(corner_z,gx,gy) routes each chunk its global-corner slice (ranges
+  GENERALIZE gen_terrain's validated 2-chunk slices: x-low[0:nL+2]/x-mid_j[nL+32j−2:+33]/
+  x-high[nx−Rx−1:nx+1], y sym); flat-reduction 16/16 == gen_terrain_flat_grid==3105; continuity
+  automatic (shared lines sampled once). du_mesh.gen_grid_from_mesh + selftest 12/12. Donor 3105,
+  mc per-chunk via _mc_from_scan (displacement-invariant), round-trip verified. EXPECTED: one
+  continuous tilted plane over the whole plate, gentle downslope +x / steeper +y, deepest (+x,+y);
+  NO crack/scramble at any of the 6 internal boundaries. Any localized defect names the offending
+  grid-interior generator's vert ordering (middle_x/double_middle/ymid/corner_middle verts UNPROVEN
+  in hardware). AWAITING DEPLOY.
 - **tests/mesh_wave_import_0704_1434.blueprint** (2026-07-04) — FIRST MESH-DRIVEN import test:
   cosine half-pipe valley z(x)=0.75+0.25·cos(πx/2) over a 4×1 patch, generated end-to-end by the
   NEW du_mesh solver (mesh → corner z-sample → blocky H + per-corner vertex offsets →

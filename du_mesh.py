@@ -368,6 +368,27 @@ def gen_yz_from_mesh(obj_path_or_geom, nx, xoff=0.0, yoff=0.0, lx0=10):
             for k, g in D.gen_corner_yz(nx).items()}
 
 
+def gen_grid_from_mesh(obj_path_or_geom, nx, ny, gx, gy, x0=0.0, y0=0.0,
+                       zbase=0.0, h=1, lz0=10):
+    """Mesh -> displaced MULTI-BOUNDARY grid via gen_terrain_grid (any number of
+    chunk-grid boundaries per axis; uniform blocky height h, amplitude <=+-1.5
+    vox). Samples the global (nx+1)x(ny+1) corner grid; per-corner dz84 =
+    (surface_z - zbase - h)*84. Continuity across all chunk seams is automatic
+    (shared corner lines sampled once). Returns {(cx,cy,cz): scan}."""
+    if isinstance(obj_path_or_geom, tuple):
+        verts, faces = obj_path_or_geom
+    else:
+        verts, faces = load_obj(obj_path_or_geom)
+    corner_z = []
+    for i in range(nx + 1):
+        line = []
+        for j in range(ny + 1):
+            z = top_z(verts, faces, x0 + i, y0 + j)
+            line.append(0 if z is None else round((z - zbase - h) * 84))
+        corner_z.append(line)
+    return D.gen_terrain_grid(corner_z, gx, gy, lz0=lz0, h=h)
+
+
 # ── OBJ -> blueprint driver (heightfield meshes, proven region types) ────────
 # Envelopes are never hand-rolled (import-test guidance): the driver picks a
 # donor export whose h3 chunk set matches the target region, keyed here.
@@ -535,7 +556,12 @@ def _selftest():
     want = D.gen_corner_yz(3)
     for k in want:
         assert scans[k] == want[k], f"yz flat {k}"
-    print("du_mesh selftest: 11/11 OK")
+    # 12: grid flat reduction (multi-boundary w/ a middle) == gen_terrain_flat_grid
+    geom = plane_mesh(40, 40, lambda x, y: 1.0)          # gx=30,nx=40 -> cx 8..10, one x-middle
+    scans = gen_grid_from_mesh(geom, 40, 40, gx=30, gy=30)
+    want = D.gen_terrain_flat_grid(30, 30, 40, 40)
+    assert set(scans) == set(want) and all(scans[k] == want[k] for k in want), "grid flat"
+    print("du_mesh selftest: 12/12 OK")
 
 
 if __name__ == "__main__":
