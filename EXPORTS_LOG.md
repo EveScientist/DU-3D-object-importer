@@ -231,13 +231,24 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   PLAN: fix (a)→(b)→(c)→(d) one at a time against 3105 as oracle, gating each behind
   size thresholds to keep 604/604 + 50/50 green; then wire 'grid' displacement region +
   bumpy sine test (amplitude ≤±1.5 vox) using 3105 envelope/mcs.
-  PROGRESS (2026-07-04, commits 987f170/ef4c678/fba47d7): **12/16 byte-exact — classes (a),(b),
-  (c) CLOSED**: (a) plate clgap band 12≤ny<32 → 2 pairs + L term; (b) middle_x/seam_high ny≥7
-  decl shrink + clgap band + pre −2/col (middle_x: nxd−1; seam_high: nxd, +2 tail); (c)
-  ymid_xhigh T = 158−5Rx+(Rx≥6)+2·((Rx+1)//12) (corner_hh-side fix was a dead end — the run
-  shrink normalizes it away; reverted). REMAINING class (d) = y-high row 4 chunks; analysis +
-  doubling hypothesis (264B/col decl period = both splice plates' groups interleaved per column
-  at large R; sub-block x-marker 0x5c formula TBD) in du-solid-deferred-checklist memory.
+  **SOLVED 16/16 BYTE-EXACT 2026-07-04 (commits 987f170/ef4c678/fba47d7/[a]/[b]/4aeba57).**
+  All 4 failure classes closed; the "decl doubling" was a difflib artifact — real cause was gap
+  shrinks + preval/length formulas at never-probed scale. Fixes:
+  (a) plate FG clgap band 12≤ny<32 → 2 pairs + L term.
+  (b) middle_x/seam_high: ny≥7 decl x-gap shrink + clgap band + pre −2/col (middle_x nxd−1;
+      seam_high nxd, +2 tail).
+  (c) ymid_xhigh T = 158−5Rx+(Rx≥6)+2·((Rx+1)//12).
+  (d) NEW 14≤ny<32 band in gen_heightmap_unified (decl xgap −2 pairs, clgap −1, pre_b10 −4·nx,
+      L −2/nx −4) → (8,11,8); same band in gen_middle_x + pre_nb −(4·nxd+2) + a max(Lnb,len(s))
+      no-truncate guard (band was cutting the last FG group) + corner_middle Ltot −2 →
+      (9/10,11,8); gen_corner_hh pre_b10 = _fg0(bd)−2 (derives from bd, inherits the band, ==
+      old formula at validated sizes) + Ltot +2 band → (11,11,8).
+  KEY LESSON: derive positions from the composed sub-plate (`_fg0(bd)−2`) instead of duplicate
+  formulas — self-adjusts to bands, zero magic constants. Bands gated to keep the 33-row (ny≥32)
+  families and all validated small-ny cases byte-identical. Single-point caveats: the exact band
+  BOUNDS (11-13 lower, 32 upper) and the corner Ltot ±2 terms are pinned only at ny∈{25,26}/Rx=Ry=24.
+  NEXT: wire 'grid' displacement region into du_mesh + bumpy sine test (amplitude ≤±1.5 vox)
+  using 3105 envelope/mcs.
 
 ## Multi-region composition probe (2026-07-04)
 - **tests/mesh_xy_tilt_0704_2019.blueprint** — displaced x=0+y=0 SURFACE CORNER: one tilted plane
