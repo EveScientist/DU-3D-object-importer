@@ -120,7 +120,15 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
   continuous tilted plane over the whole plate, gentle downslope +x / steeper +y, deepest (+x,+y);
   NO crack/scramble at any of the 6 internal boundaries. Any localized defect names the offending
   grid-interior generator's vert ordering (middle_x/double_middle/ymid/corner_middle verts UNPROVEN
-  in hardware). AWAITING DEPLOY.
+  in hardware).
+  **RENDERED PERFECTLY 2026-07-05 — one continuous tilted plane across all 16 chunks, no cracks or
+  scrambles. ALL grid-interior generators' vert ordering HARDWARE-PROVEN at scale. The large
+  landscape displacement pipeline is complete; full M-core = same op at ~8×8 + one bigger donor.**
+  OBSERVATION (design fact): displacement is RELATIVE TO THE BLOCKY TOP FACE and UNCLAMPED by DU —
+  the −120 (−1.43 vox) far corner pushed the top surface BELOW the base bottom (z=0) with the h=1
+  base. Harmless, but confirms: for downward relief the blocky base must be thick enough (h ≥
+  ceil(max|dz|/84)+margin) or the surface passes through the underside. Ties into the >±1.5-vox
+  amplitude arc (varying blocky height through grid seams).
 - **tests/mesh_wave_import_0704_1434.blueprint** (2026-07-04) — FIRST MESH-DRIVEN import test:
   cosine half-pipe valley z(x)=0.75+0.25·cos(πx/2) over a 4×1 patch, generated end-to-end by the
   NEW du_mesh solver (mesh → corner z-sample → blocky H + per-corner vertex offsets →
