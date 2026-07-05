@@ -2100,14 +2100,14 @@ def gen_corner_hh(Rx, Ry, lz0=10, h=1, verts=None):
     bd = gen_heightmap_unified([[h] * (Ry + 2)] * (Rx + 2), lx0=-2, ly0=-2, lz0=lz0)
     bf = (gen_surface_displaced([[h] * (Ry + 1)] * (Rx + 1), verts, lx0=-1, ly0=-1, lz0=lz0)
           if verts else gen_heightmap_unified([[h] * (Ry + 1)] * (Rx + 1), lx0=-1, ly0=-1, lz0=lz0))
-    pre_b10 = 340 + 3 * (Rx + 1) + 5 * (Rx + 2) * (Ry + 1) + 2 * ((Rx + 1) // 4)  # + x wide-plate floor-step for the (Rx+2)-col plate
+    pre_b10 = _fg0(bd) - 2  # preval position = bd's own (inherits large-ny gap bands; == old formula 340+3(Rx+1)+5(Rx+2)(Ry+1)+2((Rx+1)//4) at validated sizes)
     CVm2 = (217 - 55 * (-2) + 35 * (-2) + lz0) % 256
     preval = (120 - CVm2 - (h - 1) - 35 * (Ry + 1) + 55 * (Rx + 1)) % 256
     fgr = _fg_region(bf)
     s = bytearray(bd[:_last_decl_end(bd)])
     while len(s) < pre_b10: s += bytes([255, 0])
     s += bytes([preval, 0]); s += fgr
-    Ltot = pre_b10 + 4 + (len(bf) - _fg0(bf))
+    Ltot = pre_b10 + 4 + (len(bf) - _fg0(bf)) + 2 * (13 <= Ry < 31)  # +2 large-ny band trailing (3105 Ry=24, single-point)
     while len(s) < Ltot: s += bytes([255, 0])
     return bytes(s[:Ltot])
 
