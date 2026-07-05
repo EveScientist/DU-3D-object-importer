@@ -312,8 +312,8 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         return s[:t]
     # floor-step & gap-shrinks (validated nx<=12, ny<=10):
     step = (2 * ((nx + 1) // 5) if ny == 1 else 2 * ((nx - 1) // 5)) - 2 * (ny >= 4) + 2 * (4 <= ny <= 6 and (nx >= 3 or (nx == 2 and ly0 >= 0))) + dstep  # nx floor-step (ny>=2: //5, pinned by flat nx5 2969=step0 + nx7 wave 2965=step2); ny>=4 corr -2 base, +2 back for ny=4..6 & (nx>=3 or nx==2 w/ ly0>=0); nx==2 neg-ly0 (y-seam) keeps -2; dstep=+2 down-ghost
-    xgap = bytes([255, 0]) * (4 - (ny >= 7))             # decl x-gap: 8B(ny<=6)/6B(ny>=7) (plain plate keeps 6B at ny=13 -- 3105 (8,8,8))
-    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32))  # FG cluster gap: 8B/6B/4B; same band shape (ny=13 pinned, ny>=33 stays 6B)
+    xgap = bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 32))  # decl x-gap: 6B(ny>=7); 2B in the 14<=ny<32 band (ny=26 y-seam plate, 3105); ny=13 stays 6B
+    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32) - (14 <= ny < 32))  # FG cluster gap: 6B/4B/2B (ny=25 band shrink, 3105); ny>=33 stays 6B
     s = bytearray(bytes([0, 255]) * declpair0)
     for xi in range(nx):
         if xi > 0: s += xgap
@@ -334,7 +334,7 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
     BN_HI = 236                                          # narrow-band upper bound; PINNED via in-game sweep (bn=1 @CV236/2900, bn=0 @CV237/2902)
     bw = 0 if ny == 1 else (1 if CV > 160 else 0)           # wide band: preval pos + total length
     bn = 0 if ny == 1 else (1 if 160 < CV <= BN_HI else 0)  # narrow band: fg0 anchor
-    pre_b10 = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7)
+    pre_b10 = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7) - 4 * nx * (14 <= ny < 32)
     pre = pre_b10 - 2 * bw                               # pre byte position (wide band)
     pre = max(pre, len(s))                               # don't truncate decls when the declpair0 prefix (large lx0) overruns pre
     fg0pos = max(pre + 2, pre_b10 + 110 + 2 * (declpair0 - 59) - 2 * bn)  # fg0 (narrow band; floored at pre+2)
@@ -375,7 +375,7 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         else:
             for j in range(ny): s += grp(33 - rInc(ec, j), rDec(ec, j))
         if k < nx - 1: s += clgap
-    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn
+    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32) - 2 * (14 <= ny < 32)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn - 4 * (14 <= ny < 32)
     return bytes(pad_to(s, L))
 
 
