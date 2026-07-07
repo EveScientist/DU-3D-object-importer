@@ -314,3 +314,8 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
   chunks + 2 flat-degenerate Rx=1 corner). **DEPLOYED CORRECTLY 2026-07-05 — negative-octant landscape
   HARDWARE-PROVEN: octant-agnostic interiors + ordinary x=0/y=0 boundaries + ny=32 edges all render as
   one continuous smooth dome. Full-M-core landscape = same op at core scale + a full-core flat donor.**
+- **tests/fullcore_dome_0705.blueprint** (2026-07-05) — FULL M-CORE LANDSCAPE: 1-vox dome over the
+  interior 6×6 (192×192, all 4 octants across x=0/y=0, seamless dome→0 at border) + flat border ring
+  (donor 3151's real chunks). **DEPLOYED SUCCESSFULLY 2026-07-05 — full-M-core bumpy landscape
+  HARDWARE-PROVEN at 8×8-chunk scale. Landscape capability COMPLETE (flat-bordered); full edge-to-edge
+  bumpiness needs only the ny=31/Rx=30 border grind (mechanical).**
