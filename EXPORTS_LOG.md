@@ -319,3 +319,9 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
   (donor 3151's real chunks). **DEPLOYED SUCCESSFULLY 2026-07-05 — full-M-core bumpy landscape
   HARDWARE-PROVEN at 8×8-chunk scale. Landscape capability COMPLETE (flat-bordered); full edge-to-edge
   bumpiness needs only the ny=31/Rx=30 border grind (mechanical).**
+- **tests/fullcore_edge_dome_0705.blueprint** (2026-07-05) — EDGE-TO-EDGE bumpy full M-core: centered
+  dome (sigma70) with displacement all the way to the edges; 61 bumpy chunks (all edge rows/columns
+  now generate correctly) + 3 flat structural corners (NW/SE/NE, dome~0 there → seamless). Donor 3151.
+  Edge fixes: north row ny=31 (gen_corner_middle(30) ybfs-skip), east col Rx=30 (gen_ymid_xhigh T+1),
+  ny=31 flush in gen_middle_x. 61/64 structural byte-exact (25 differ only by DU's flat bevel, which
+  our displacement overwrites). AWAITING DEPLOY.
