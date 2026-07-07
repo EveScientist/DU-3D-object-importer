@@ -23,6 +23,10 @@ data can be re-used. **Every new export MUST be added here** with its exact XYZ.
 | 2977 | Plain single voxel | (10.5, 10.5, 10.5) | (8,8,8) | A2 single-voxel reference. scan len 706, mc 605. |
 | 2979 | Single voxel, **TOP** +X/+Y corner deflected X−1,Y−1 | (10.5, 10.5, 10.5) | (8,8,8) | A2: 8→12-byte expand. V0=(0,0,0), V1=(−1,−1,0). Full-scan reconstruct byte-exact. |
 | 2981 | Single voxel, **BOTTOM** +X/+Y corner deflected X−1,Y−1 | (10.5, 10.5, 10.5) | (8,8,8) | A2: V0=(−1,−1,0), V1=(0,0,0). Confirms V0=bottom / V1=top convention. |
+| 3156 | Plain 2×2×2 solid (closed-shapes PROBE 1 reference) | X,Y,Z∈{10.5,11.5} | (8,8,8) | scan 765, mc 624. |
+| 3157 | Same block, hand-displaced UNDERSIDE + TOP on same column | X,Y,Z∈{10.5,11.5} | (8,8,8) | scan 769 (+4), mc 624. **TWO-SURFACE PROVEN**: (11,11,10) bottom−42 & (11,11,12) top+42 = same column bottom+top, independent, both 8B in-place z-slot; (10,10,10) outer bottom−28 → run2 face 8B→12B tilt. See closed_shapes_kickoff PROBE 1 RESULT. |
+| 3160 | Same block, 4 SIDE-face (vertical) hand-drags | X,Y,Z∈{10.5,11.5} | (8,8,8) | scan 789 (+24), mc 624. **SIDES PROVEN** (x/y slots = z mechanics): (12,11,11)+x ctr x−29 & (10,11,11)−x ctr x−46 → **16B THREE-VERTEX** (middle vertex T1); (11,10,12)−y top y+28 & (11,10,10)−y bottom y+56 → 12B two-vertex V1/V0. See closed_shapes_kickoff PROBE 2 RESULT. |
+| 3162 | **4×4×4 solid**, 7 Z-drags on face-interior verts (displaced ONLY, no plain twin) | X,Y,Z∈{8.5,9.5,10.5,11.5} (spans 8..12) | (8,8,8) | scan 1009. **WALK ORDER SOLVED**: 5 X-plane sections (X slow, Y fast); interior columns = Bottom(val29)+Top(val2) run-0 z-slot pairs. Anchors: top +18/+34/+50/+70 @563/651/739/595, bottom −24/−42/−60 @555/643/731. See closed_shapes_kickoff PROBE 3 RESULT. |
 
 | 2983 | Build G — z=0 straddle, 2×2, 2 layers each side (16 vox) | X∈{10.5,11.5}, Y∈{10.5,11.5}, Z∈{−1.5,−0.5,+0.5,+1.5} | (8,8,8) HIGH + (8,8,7) LOW | **Material = Military Al-Li Panel (hcAlLiPa, code 12)** — scan is material-independent so analysis valid. B1 depth-3: both chunks len 757, run=3. LOW off by 3 value-bytes (@119 −1, @353 +1, @463 −1 = ×(depth−2)); HIGH interior-transform bug (rewrote to mirror LOW). |
 
@@ -328,3 +332,13 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
   Edge fixes: north row ny=31 (gen_corner_middle(30) ybfs-skip), east col Rx=30 (gen_ymid_xhigh T+1),
   ny=31 flush in gen_middle_x. 61/64 structural byte-exact (25 differ only by DU's flat bevel, which
   our displacement overwrites). AWAITING DEPLOY.
+- **tests/lens_capsule_0707.blueprint** (2026-07-07) — FIRST GENERATED CLOSED SHAPE (du_dense.py):
+  4×4×4 solid carved to a lens/capsule (domed top peak +72, domed bottom −64, +6 +x tilt, flat
+  sides). Plain donor recovered by zeroing 3162's displacements (no extra build). **DEPLOYED &
+  RENDERED CLEAN 2026-07-07 — smooth closed surface, no cracks; user read back all 25 grid points =
+  byte-exact match. Two-surface dense generation hardware-proven.** NEXT: rounded sides (probe 4).
+- **tests/barrel_x_0707.blueprint** (2026-07-07) — INCREMENT A: du_dense ±X faces rounded (barrel bulge),
+  flat top/bottom/±Y. **DEPLOYED PERFECTLY** — generated full-form side groups accepted by DU.
+- **tests/gem_0707.blueprint** (2026-07-07) — INCREMENT B: 4×4×4 inflated to a near-sphere via one
+  radial field (du_dense.apply_shape) — all 6 faces + edges + corners. **DEPLOYED — smooth near-sphere,
+  no cracks. COMPLETE single-chunk closed-surface generator hardware-proven (incl ±Y faces).**
