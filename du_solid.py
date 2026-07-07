@@ -312,8 +312,8 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         return s[:t]
     # floor-step & gap-shrinks (validated nx<=12, ny<=10):
     step = (2 * ((nx + 1) // 5) if ny == 1 else 2 * ((nx - 1) // 5)) - 2 * (ny >= 4) + 2 * (4 <= ny <= 6 and (nx >= 3 or (nx == 2 and ly0 >= 0))) + dstep  # nx floor-step (ny>=2: //5, pinned by flat nx5 2969=step0 + nx7 wave 2965=step2); ny>=4 corr -2 base, +2 back for ny=4..6 & (nx>=3 or nx==2 w/ ly0>=0); nx==2 neg-ly0 (y-seam) keeps -2; dstep=+2 down-ghost
-    xgap = bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 32))  # decl x-gap: 6B(ny>=7); 2B in the 14<=ny<32 band (ny=26 y-seam plate, 3105); ny=13 stays 6B
-    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32) - (14 <= ny < 32))  # FG cluster gap: 6B/4B/2B (ny=25 band shrink, 3105); ny>=33 stays 6B
+    xgap = bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 33) - (ny == 32))  # decl x-gap: 6B(ny>=7); 2B in 14..31; 0B at ny=32 edge (3114); ny>=33 stays 6B
+    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 33) - (14 <= ny < 33) - (ny == 32))  # FG cluster gap: shrinks to 0 at ny=32 edge (3114); ny>=33 stays 6B
     s = bytearray(bytes([0, 255]) * declpair0)
     for xi in range(nx):
         if xi > 0: s += xgap
@@ -334,7 +334,7 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
     BN_HI = 236                                          # narrow-band upper bound; PINNED via in-game sweep (bn=1 @CV236/2900, bn=0 @CV237/2902)
     bw = 0 if ny == 1 else (1 if CV > 160 else 0)           # wide band: preval pos + total length
     bn = 0 if ny == 1 else (1 if 160 < CV <= BN_HI else 0)  # narrow band: fg0 anchor
-    pre_b10 = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7) - 4 * nx * (14 <= ny < 32)
+    pre_b10 = 340 + 3 * (nx - 1) + 5 * nx * (ny - 1) + step - 2 * (nx - 1) * (ny >= 7) - 4 * nx * (14 <= ny < 33) - (2 * nx - 2) * (ny == 32)
     pre = pre_b10 - 2 * bw                               # pre byte position (wide band)
     pre = max(pre, len(s))                               # don't truncate decls when the declpair0 prefix (large lx0) overruns pre
     fg0pos = max(pre + 2, pre_b10 + 110 + 2 * (declpair0 - 59) - 2 * bn)  # fg0 (narrow band; floored at pre+2)
@@ -375,8 +375,8 @@ def gen_heightmap_unified(H, lx0=10, ly0=10, lz0=10, dstep=0, cz_neg=False):
         else:
             for j in range(ny): s += grp(33 - rInc(ec, j), rDec(ec, j))
         if k < nx - 1: s += clgap
-    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32) - 2 * (14 <= ny < 32)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn - 4 * (14 <= ny < 32)
-    return bytes(pad_to(s, L))
+    L = (pre_b10 + 110) + (1 + nx) * (1 + ny) * 8 + nx * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 33) - 2 * (14 <= ny < 33) - 4 * (ny == 32)) + (216 - 10 * (nx - 1)) + step + nspec * (ny - 1) * 8 - 2 * bw - 2 * bn - 4 * (14 <= ny < 32)
+    return bytes(pad_to(s, max(L, len(s))))               # guard: ny=32 edge L must not truncate the last FG group
 
 
 # ── CHUNK SEAM (x-axis) ─────────────────────────────────────────────────────
@@ -466,7 +466,7 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
         return s[:t]
     s = bytearray(bytes([0, 255]) * dp_d)
     for xi in range(nxd):
-        if xi > 0: s += bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 32))  # decl x-gap band (3105)
+        if xi > 0: s += bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 33) - (ny == 32))  # decl x-gap band (3105; ny=32 edge flush, 3114)
         for yi in range(ny):
             if xi == 0 and yi == 0: s += bytes([0, CVm2, 1, 2, h - 1, 0])
             elif yi == 0: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
@@ -474,12 +474,13 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
     pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + step - 2 * (nxd - 1) * (ny >= 7) - (4 * nxd + 2) * (14 <= ny < 32)
     bumped = len(s) > pre_nb                              # decl region overruns the formula pre (higher ly0, larger dp_d)
     pre_nb = max(pre_nb, len(s))                          # -> don't truncate the last decl
+    if ny == 32: pre_nb = len(s)                          # ny=32 edge: decls flush into preval (3114 south row)
     s = pad_to(s, pre_nb)
     s += bytes([(120 - CVm2 - (h - 1) - 35 * (ny - 1) + 55 * (nxd - 1)) % 256, 0])
     fg0 = pre_nb + 110 + 2 * (dp_g - 59)
     s = pad_to(s, fg0)
     def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
-    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 32) - (14 <= ny < 32))  # FG cluster gap (banded shrinks, matches gen_heightmap)
+    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 33) - (14 <= ny < 33) - (ny == 32))  # FG cluster gap (banded shrinks; ny=32 edge flush, 3114)
     s += grp(CVm1 + 19, h)
     for j in range(ny): s += grp(33 - h, h)
     s += clgap
@@ -487,8 +488,8 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
         s += grp(164 - h - 35 * (ny - 1), h)
         for j in range(ny): s += grp(33 - h, h)
         if k < nxg - 1: s += clgap
-    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 32) - 2 * (14 <= ny < 32)) \
-        + (322 - 10 * R) + step - 10 - 4 * bumped - 4 * (12 <= ny < 32) - 2 * (14 <= ny < 32)
+    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 33) - 2 * (14 <= ny < 33) - 2 * (ny == 32)) \
+        + (322 - 10 * R) + step - 10 - 4 * bumped - 4 * (12 <= ny < 32) - 2 * (14 <= ny < 32) - 4 * (ny == 32)
     Lnb = max(Lnb, len(s))                                # never truncate real FG content (large-ny band under-sizes)
     s = bytearray(pad_to(s, Lnb))
     if verts:                                             # post-patch FG groups -> displaced (same as gen_seam_high)
