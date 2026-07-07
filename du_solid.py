@@ -466,7 +466,7 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
         return s[:t]
     s = bytearray(bytes([0, 255]) * dp_d)
     for xi in range(nxd):
-        if xi > 0: s += bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 33) - (ny == 32))  # decl x-gap band (3105; ny=32 edge flush, 3114)
+        if xi > 0: s += bytes([255, 0]) * (4 - (ny >= 7) - 2 * (14 <= ny < 33) - (31 <= ny <= 32))  # decl x-gap band (ny=31/32 edge flush, 3151) (3105; ny=32 edge flush, 3114)
         for yi in range(ny):
             if xi == 0 and yi == 0: s += bytes([0, CVm2, 1, 2, h - 1, 0])
             elif yi == 0: s += bytes([(200 - h - 35 * (ny - 1)) % 256, 1, 2, h - 1, 0])
@@ -474,13 +474,13 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
     pre_nb = 340 + 3 * (nxd - 1) + 5 * nxd * (ny - 1) + step - 2 * (nxd - 1) * (ny >= 7) - (4 * nxd + 2) * (14 <= ny < 32)
     bumped = len(s) > pre_nb                              # decl region overruns the formula pre (higher ly0, larger dp_d)
     pre_nb = max(pre_nb, len(s))                          # -> don't truncate the last decl
-    if ny == 32: pre_nb = len(s)                          # ny=32 edge: decls flush into preval (3114 south row)
+    if 31 <= ny <= 32: pre_nb = len(s)                    # ny=31/32 edge: decls flush into preval (3114/3151)
     s = pad_to(s, pre_nb)
     s += bytes([(120 - CVm2 - (h - 1) - 35 * (ny - 1) + 55 * (nxd - 1)) % 256, 0])
     fg0 = pre_nb + 110 + 2 * (dp_g - 59)
     s = pad_to(s, fg0)
     def grp(val, run): return bytes([val % 256, 1, run, 0x7e, 0x7e, 0x7e, run, 0])
-    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 33) - (14 <= ny < 33) - (ny == 32))  # FG cluster gap (banded shrinks; ny=32 edge flush, 3114)
+    clgap = bytes([255, 0]) * (4 - (ny >= 6) - (12 <= ny < 33) - (14 <= ny < 33) - (31 <= ny <= 32))  # FG cluster gap (ny=31/32 edge flush, 3151)
     s += grp(CVm1 + 19, h)
     for j in range(ny): s += grp(33 - h, h)
     s += clgap
@@ -488,8 +488,8 @@ def gen_middle_x(R=32, ly0=10, lz0=10, h=1, ny=1, verts=None):
         s += grp(164 - h - 35 * (ny - 1), h)
         for j in range(ny): s += grp(33 - h, h)
         if k < nxg - 1: s += clgap
-    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 33) - 2 * (14 <= ny < 33) - 2 * (ny == 32)) \
-        + (322 - 10 * R) + step - 10 - 4 * bumped - 4 * (12 <= ny < 32) - 2 * (14 <= ny < 32) - 4 * (ny == 32)
+    Lnb = fg0 + (1 + nxg) * (1 + ny) * 8 + nxg * (8 - 2 * (ny >= 6) - 2 * (12 <= ny < 33) - 2 * (14 <= ny < 33) - 2 * (31 <= ny <= 32)) \
+        + (322 - 10 * R) + step - 10 - 4 * bumped - 4 * (12 <= ny < 32) - 2 * (14 <= ny < 32) - 4 * (31 <= ny <= 32)
     Lnb = max(Lnb, len(s))                                # never truncate real FG content (large-ny band under-sizes)
     s = bytearray(pad_to(s, Lnb))
     if verts:                                             # post-patch FG groups -> displaced (same as gen_seam_high)
@@ -919,9 +919,9 @@ def gen_corner_middle(Ry, lz0=10, h=1, verts=None):
         if base_decl[i+1] == 1 and base_decl[i+2] == 2 and base_decl[i+4] == 0 and base_decl[i] not in (0, 255):
             de = i + 5; i += 5
         else: i += 1
-    head = base_decl[:de] + bytes([255, 0]) + base_decl[de:_fg0(base_decl)]   # ybfs=1 insertion
+    head = base_decl[:de] + (b'' if Ry == 30 else bytes([255, 0])) + base_decl[de:_fg0(base_decl)]  # ybfs=1 insertion (skipped @Ry=30: ny=32 decl already flushes, 3151)
     s = bytearray(head + fgr)
-    Ltot = len(base_decl) - len(_fg_region(base_decl)) + len(fgr) + 4 + 2 - 2 * (13 <= Ry < 31)  # +4 ybfs, +2 corner-middle; -2 large-ny band (3105 Ry=24)
+    Ltot = len(base_decl) - len(_fg_region(base_decl)) + len(fgr) + 4 + 2 - 2 * (13 <= Ry < 31) - 4 * (Ry == 30)  # +4 ybfs, +2 corner-middle; -2 band (Ry=24); Ry=30 no-ybfs (3151)
     while len(s) < Ltot: s += bytes([255, 0])
     return bytes(s[:Ltot])
 
@@ -977,7 +977,7 @@ def gen_ymid_xhigh(Rx, lz0=10, h=1, verts=None):
     00ff-x3 clgaps and shrink the two big background runs to T = 158 - 5*Rx + (Rx>=6).
     Byte-exact vs 2848/2850/2852 (Rx=2,4,6). Rx even validated (odd/Rx>6 untested)."""
     g = bytearray(gen_corner_hh(Rx, 33, lz0=lz0, h=h, verts=verts))
-    runs = _abruns(g); T = 158 - 5 * Rx + (Rx >= 6) + 2 * ((Rx + 1) // 12)  # 2nd term pinned Rx=24 (3105); 7-23 unprobed
+    runs = _abruns(g); T = 158 - 5 * Rx + (Rx >= 6) + 2 * ((Rx + 1) // 12) + (Rx == 30)  # 2nd term Rx=24 (3105); +1 @Rx=30 (3151 east col)
     big2 = sorted([(n, a) for a, n in runs], reverse=True)[:2]
     ops = [(a, 2 * (n - T)) for n, a in big2] + [(a, 6) for a, n in runs if n == 3]
     for a, cnt in sorted(ops, reverse=True): del g[a:a + cnt]
