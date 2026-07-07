@@ -309,3 +309,8 @@ Older referenced exports whose exact XYZ should be added here when re-confirmed:
 2494 (solid interior, chunk (2,2,2)); 2906/2910/2935/2937 (z=0 seams, base position
 UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/valley);
 2959/2961/2963/2965/2967/2969/2971 (relief profiles); 2941/2943 (x=0 / y=0 seams).
+- **tests/grid_centered_dome_0705.blueprint** (2026-07-05) — negative-octant bumpy landscape validation:
+  centered Gaussian dome spanning ALL FOUR octants across x=0 AND y=0 (donor 3114, 23 gen_terrain_grid
+  chunks + 2 flat-degenerate Rx=1 corner). **DEPLOYED CORRECTLY 2026-07-05 — negative-octant landscape
+  HARDWARE-PROVEN: octant-agnostic interiors + ordinary x=0/y=0 boundaries + ny=32 edges all render as
+  one continuous smooth dome. Full-M-core landscape = same op at core scale + a full-core flat donor.**
