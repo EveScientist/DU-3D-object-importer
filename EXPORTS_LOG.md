@@ -342,3 +342,13 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
 - **tests/gem_0707.blueprint** (2026-07-07) — INCREMENT B: 4×4×4 inflated to a near-sphere via one
   radial field (du_dense.apply_shape) — all 6 faces + edges + corners. **DEPLOYED — smooth near-sphere,
   no cracks. COMPLETE single-chunk closed-surface generator hardware-proven (incl ±Y faces).**
+| 3178 | 8x4x4 solid box crossing chunk boundary (multi-chunk probe 6) | X game 27.5-34.5, Y/Z 8.5-11.5 | (8,8,8)+(9,8,8) | Dense seam: continued face uncapped (interior BT plane), 1-plane overlap both chunks, seam opener val 67 vs 63 outer/55 interior. |
+| 3179 | 3178 box + top-row arc across seam (multi-chunk probe 7) | same as 3178 | (8,8,8)+(9,8,8) | SEAM AGREEMENT: overlap planes x31/32/33 byte-identical +32/48/36 in both chunks; 3-plane overlap; surface continuous across seam. |
+- **tests/mc_dome_0707.blueprint** (2026-07-07) — FIRST GENERATED MULTI-CHUNK closed surface: domed-top box spanning chunk (8,8,8)/(9,8,8) seam, one dome field across both chunks, overlap byte-identical. **DEPLOYED AS EXPECTED — continuous across seam, no crack. Multi-chunk generation proven.**
+- **tests/ellipsoid_gentle_0707.blueprint** (2026-07-07) — 3172 ball gently squashed 82% in z (coord de-risk). DEPLOYED: clean oblate ellipsoid, slightly faceted. Confirms coordinate extraction sound; earlier failure was overshoot not coords.
+| 3185 | ~24-vox solid ball crossing Y chunk boundary (bigger-ball donor) | ~game(32.5,16.5,16.5), crosses Y=32.5 | (8,8,8)+(8,9,8) | Parses to 25 X-planes/chunk (marker-region fix: group regions >100B). Y-seam column mapping puzzle (mirror/double-max) unresolved. |
+| 3187 | 4x8x4 solid box crossing Y boundary (Y-seam probe 8) | X/Z game 8.5-11.5, Y 27.5-34.5 | (8,8,8)+(8,9,8) | Y-seam = X-seam on column axis: 3-col overlap (Y31/32/33), uncapped continued faces, col->Y=ylo+c. |
+| 3189 | 24-vox sphere @ (32,16,16), crosses X | center 32,16,16 | (8,8,8)+(9,8,8) | Correct X-crossing sphere donor. |
+| 3191 | 20-vox SOLID sphere @ (16,16,16), single chunk | center 16,16,16 | (8,8,8) | Clean known-solid donor. 21 X-planes, h up to ~24 center. Parser tall-column(h>17) Top-detect bug found. |
+- **tests/mc_lens_0707.blueprint** (2026-07-07) — multi-chunk LENS (domed top+bottom) across X-seam from box donor. **DEPLOYED AS EXPECTED — multi-chunk CLOSED-shape generation proven (two surfaces continuous across chunk seam).**
+- **tests/ellipsoid2_0707.blueprint** (2026-07-07) — 3191 gentle 80%% z-squash, full parse. DEPLOYED: equator (central 8 Z) SMOOTH (core BT extraction validated), top/bottom ~5 Z-rows blocky (run>0 cap-vertex placement is the pinpointed remaining gap).
