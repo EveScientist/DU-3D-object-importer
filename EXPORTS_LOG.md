@@ -350,5 +350,17 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
 | 3187 | 4x8x4 solid box crossing Y boundary (Y-seam probe 8) | X/Z game 8.5-11.5, Y 27.5-34.5 | (8,8,8)+(8,9,8) | Y-seam = X-seam on column axis: 3-col overlap (Y31/32/33), uncapped continued faces, col->Y=ylo+c. |
 | 3189 | 24-vox sphere @ (32,16,16), crosses X | center 32,16,16 | (8,8,8)+(9,8,8) | Correct X-crossing sphere donor. |
 | 3191 | 20-vox SOLID sphere @ (16,16,16), single chunk | center 16,16,16 | (8,8,8) | Clean known-solid donor. 21 X-planes, h up to ~24 center. Parser tall-column(h>17) Top-detect bug found. |
+| 3197 | Opener-CV probe P1: uniform solid 6x6x4 box | x8..13 y8..13 z8..11 | (8,8,8) | Footprint probe. interior opener=21 -> pinned −35·ncols term. |
+| 3199 | Opener-CV probe P2: ascending Y-staircase h=[2,4,6,8,10], 3 planes x 5 cols | x8..10 y8..12 z8+ | (8,8,8) | interior opener=50, continuation gradient +2. |
+| 3201 | Opener-CV probe P3: descending Y-staircase h=[10,8,6,4,2] | x8..10 y8..12 z8+ | (8,8,8) | interior opener=58, continuation gradient −2. Cracked opener CV + gradient law. |
+| 3203 | Opener-CV probe P4: non-monotonic Y-profile h=[2,10,4,8,6], 2 planes | x8..9 y8..12 z8+ | (8,8,8) | interior opener=54 -> opener uses h_yHI. SOLVED marker region = circular delta val[i]=34−h[i−1]. |
+| 3205 | Closeout P5a: uniform 4×4×6 box (h6) | x8..11 y8..11 z8..13 | (8,8,8) | bnd_op=65 (NOT 69) -> 57+2h dead. interior opener=89=235−140−6 ✓. |
+| 3207 | Closeout P5b: staircase [6,8,10,12] no-h4, 2 planes | x8..9 y8..11 z8+ | (8,8,8) | bnd_op=65 -> bnd_op is positional not height. |
+| 3209 | Closeout P6a: uniform 3×7×4 box (nc7) | x8..10 y8..14 z8..11 | (8,8,8) | group gap=6, marker gap=6. grpspan formula exact. |
+| 3211 | Closeout P6b: uniform 3×8×4 box (nc8) | x8..10 y8..15 z8..11 | (8,8,8) | group gap=6, marker gap=6. |
+| 3213 | Closeout P7: 4×4×4 box SHIFTED +10 all axes | x18..21 y18..21 z18..21 | (8,8,8) | POSITION: content identical to 3162; only lead(99→197)+bnd_op(65→131) shift. |
+| 3215 | Position S1: 4×4×4 shift X only +10 | x18..21 y8..11 z8..11 | (8,8,8) | lead=195 bnd_op=27. |
+| 3217 | Position S2: 4×4×4 shift Y only +10 | x8..11 y18..21 z8..11 | (8,8,8) | lead=101 bnd_op=159. |
+| 3219 | Position S3: 4×4×4 shift Z only +10 | x8..11 y8..11 z18..21 | (8,8,8) | lead=99 bnd_op=75. Position law additive; z solved (bnd +z, lead 0). |
 - **tests/mc_lens_0707.blueprint** (2026-07-07) — multi-chunk LENS (domed top+bottom) across X-seam from box donor. **DEPLOYED AS EXPECTED — multi-chunk CLOSED-shape generation proven (two surfaces continuous across chunk seam).**
 - **tests/ellipsoid2_0707.blueprint** (2026-07-07) — 3191 gentle 80%% z-squash, full parse. DEPLOYED: equator (central 8 Z) SMOOTH (core BT extraction validated), top/bottom ~5 Z-rows blocky (run>0 cap-vertex placement is the pinpointed remaining gap).
