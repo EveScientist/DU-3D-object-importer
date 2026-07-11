@@ -184,12 +184,12 @@ def build_scan_general(cols, mc, bnd_op=65, lead=99, smooth_fn=None):
         gregs.append(bytes(out))
 
     # ---- layout (small-regime; M2 = general engine) ----
-    mkgap=8 if maxnc<=6 else 6
-    ggap=8 if maxnc<=5 else 6
-    if maxnc==4: pad=246-10*nx
-    elif maxnc==5: pad=240-8*nx if nx<=3 else 246-10*nx
-    elif maxnc==6: pad=246-10*nx
-    else: pad=241-9*nx
+    # gap bands by max plane nc (validated nc4..nc16 + 3191): <=6:8, 7..14:6, >=16:4
+    mkgap=8 if maxnc<=6 else (6 if maxnc<=14 else 4)
+    ggap=8 if maxnc<=5 else (6 if maxnc<=14 else 4)
+    if maxnc==5: pad=240-8*nx if nx<=3 else 246-10*nx
+    elif 7<=maxnc<=8: pad=241-9*nx
+    else: pad=246-10*nx        # nc4,6,12,16 (B12=3353/B16=3355) all on this line
     markerspan=sum(len(m) for m in mplanes)+mkgap*(nx-1)
     mat_off=lead+markerspan+pad if lead!=99 else (99+markerspan)+pad
     grp_off=mat_off+90+(lead-99)
