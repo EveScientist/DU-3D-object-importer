@@ -38,6 +38,10 @@ tests=[
                       **{(x,9):[(8,9),(12,13)] for x in range(8,11)}}),
  ('3363 OVH2',       {**{(x,y):(8,9) for x in range(8,11) for y in range(8,11)},
                       **{(x,9):[(8,9),(13,15)] for x in range(8,11)}}),
+ ('3372 OVH3',       {**{(x,y):(8,9) for x in range(8,11) for y in range(8,11)},
+                      **{(x,9):[(8,9),(12,14)] for x in range(8,11)}}),
+ ('3374 OVH4',       {**{(x,y):(8,9) for x in range(8,11) for y in range(8,11)},
+                      **{(x,y):[(8,9),(12,13)] for x in range(8,11) for y in (8,9)}}),
 ]
 def mchunks(name):
     for d in ('exports','exports/archive'):
