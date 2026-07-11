@@ -52,8 +52,11 @@ def mchunks(name):
         key=tuple(int(e[k]['$numberLong']) for k in ('x','y','z'))
         out[key]=(dec[64:-40], int.from_bytes(dec[-40:-36],'little'))
     return out
+H367={27:2,28:2,29:3,30:3,31:3,32:4,33:4,34:4}
 mctests=[
  ('3178 X-seam box', {(x,y):(8,11) for x in range(27,35) for y in range(8,12)},
+  {(8,8,8):755,(9,8,8):641}),
+ ('3367 X-seam ramp', {(x,y):(8,8+H367[x]-1) for x in H367 for y in range(8,12)},
   {(8,8,8):755,(9,8,8):641}),
  ('3187 Y-seam box', {(x,y):(8,11) for x in range(8,12) for y in range(27,35)},
   {(8,8,8):657,(8,9,8):683}),

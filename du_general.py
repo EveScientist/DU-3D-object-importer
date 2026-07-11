@@ -175,10 +175,16 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     F=35*ncp(L) + Tlast(L) - zfirst(R)
                 else:               # deeper descent: shifted pair = marker-F(L)
                     F=_F(L)
-            elif vol(L)==vol(R) and ncp(L)==ncp(R) and L>0:
-                own = L if g>nx//2 else R          # tie: owner by shape half
-                F=_F(own)
-            else:                   # ascending/equal: own-pair form = marker-F(R)
+            elif vol(L)==vol(R):    # vol tie, equal nc: T := MAX column top of the pair.
+                # Pinned jointly by 3252 g2 (non-identical mirrored planes: X=16=maxT,
+                # NOT Tlast(L)=14, NOT the old owner-by-half _F(L) whose agreement at 16
+                # was coincidental) and PLT-MC 3367's identical-plane ties (X=12=maxT;
+                # _F(L)=11 rejected in-game: Deployments 11a-c invalid-vertex).
+                # max over BOTTOM-interval tops: OVH1/2 pin that a multi-interval column's
+                # upper intervals do NOT enter the tie max (donor 92 = base top 10).
+                mT=max(zt(planes[q][0],y) for q in (L,R) for y in mycols(q))
+                F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
+            else:                   # ascending/descending equal-nc: own-pair form
                 F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
         else:
             own = R if vol(R)>vol(L) else (L if vol(L)>vol(R) else (R if g<=nP//2 else L))
