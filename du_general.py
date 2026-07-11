@@ -192,7 +192,17 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             else:                   # ascending/descending equal-nc: own-pair form
                 F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
         else:
-            own = R if vol(R)>vol(L) else (L if vol(L)>vol(R) else (R if g<=nP//2 else L))
+            if vol(R)!=vol(L):
+                own = R if vol(R)>vol(L) else L
+            else:
+                # tie: owner is on the ASCENDING side -- compare outer neighbors' volumes
+                # (3191 g9 right / g12 left; 3189c1 plateau-edge line pins that the old
+                # "chunk-half" proxy fails in seam chunks, where the shape's peak is not
+                # at the chunk's middle). Equal/absent neighbors: identical planes make
+                # _F(L)==_F(R), so the pick is immaterial.
+                vL1 = vol(L-1) if L-1>=0 else -1
+                vR1 = vol(R+1) if R+1<nP else -1
+                own = R if vR1>=vL1 else L
             F=_F(own)
         return F
     def _upwall(toks,smooth,ua,ub,g,yw):
