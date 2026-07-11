@@ -68,7 +68,12 @@ def _tok(v,r): return bytes([v&0xff,1,r&0xff,0x7e,0x7e,0x7e,r&0xff,0])
 def _enc(d): return (int(round(d))+126)&0xff
 
 def bnd_op_law(x,y,z): return (65 - 55*(x-8) + 35*(y-8) + (z-8)) % 256
-def lead_law(x,y): return 99 + (48*(x-8))//5 + 2*((y-8)//9)
+def lead_law(x,y):
+    yt=2*((y-8)//9)
+    # xseam chunks (x<8, local negatives): nonzero y-terms shift +2 (3380 chunks 9/1;
+    # x>=8 donors unaffected). Full law needs an x-sweep (known bad point: (20,13)->215).
+    if x<8 and yt!=0: yt+=2
+    return 99 + (48*(x-8))//5 + yt
 def _mkband(s): return 8 if s<=12 else (6 if s<=28 else (4 if s<=42 else 2))
 def _gband(s):  return 8 if s<=10 else (6 if s<=28 else (4 if s<=42 else 2))
 
@@ -335,12 +340,15 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             A=pmv(u,v); B=pmv(p,q)
             return 0 if (A is None or B is None) else A-B
         wstart=u0+1
-        if sm:  # y-seam entry: std pair at wall S-1 (=u0+1) with B val := 234 - F_ylo
+        if sm:  # y-seam entry: std pair at wall S-1 (=u0+1) with B val := 234 - F_ylo;
+                # on an X-seam entry line the adjustments COMPOSE: B := seam_op - 36 + 35
+                # (3380 corner chunk: 0x08 = 9 - 1)
             a,b=u0,u0+1
             zloc=[z for z in (zl(xL,a),zl(xL,b),zl(xR,a),zl(xR,b)) if z is not None]
             ztc =[z for z in (zt(xL,a),zt(xL,b),zt(xR,a),zt(xR,b)) if z is not None]
             hc  =[v for v in (h(xL,a),h(xL,b),h(xR,a),h(xR,b)) if v>0]
-            toks=[((234-_ylo_F(g))%256, max(zloc)-min(zloc))]; smooth=[(g,b,min(zloc))]
+            bsm=(_seam_marker_op()-1)%256 if (g==g0 and xseam_lo) else (234-_ylo_F(g))%256
+            toks=[(bsm, max(zloc)-min(zloc))]; smooth=[(g,b,min(zloc))]
             toks.append(((min(hc)-2)%256, max(ztc)-min(ztc))); smooth.append((g,b,min(ztc)))
             wstart=u0+2
         elif g==g0 and xseam_lo:  # x-seam entry line (S-1): interior form, opener = seam - 36
@@ -436,12 +444,18 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     if lead is None:
         lead=lead_law(planes[0][0], mycols(0)[0])
     markerspan=sum(len(m) for m in mplanes)+sum(mkgaps)
-    mat_off=99+markerspan+pad              # lead-independent (3213/3215/3217 mat@409)
+    # premat = pad - (lead-99), exact on every donor incl 3380c1's 0; when the formula
+    # goes NEGATIVE it lands at 4 (X3 3382 mid: -8 -> 4; single point, provisional --
+    # could be +12 wrap or const 4)
+    premat=pad-(lead-99)
+    if premat<0: premat=4
+    mat_off=lead+markerspan+premat
     grp_off=mat_off+lead-9
-    if xseam_lo: grp_off+=10               # provisional hook (3178c2)
-    if yseam_lo is not None: grp_off+=2    # provisional hook (3187c2)
+    if xseam_lo: grp_off+=10               # hook (3178c2); NOT stacked with yseam (3380 corner)
+    elif yseam_lo is not None: grp_off+=2  # hook (3187c2)
+    if xseam_lo and yopen_hi is not None: grp_off-=2   # hook (3380 chunk (9,8,8))
     grpspan=sum(len(g) for g in gregs)+sum(ggaps)
-    trailing=mat_off-lead-markerspan
+    trailing=premat
     scanlen=grp_off+grpspan+trailing
     S=bytearray(scanlen); pl=[(mat_off,bytes([mc&0xff]),False)]; off=lead
     for i,m in enumerate(mplanes):

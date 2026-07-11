@@ -68,6 +68,10 @@ mctests=[
   {(8,8,8):603,(8,8,9):633}),
  ('3378 Z-seam steps', {(x,y):(27,[30,33,35,30][y-8]) for x in range(8,11) for y in range(8,12)},
   {(8,8,8):550,(8,8,9):582}),
+ ('3380 XY-corner box', {(x,y):(8,11) for x in range(27,35) for y in range(27,35)},
+  None),
+ ('3382 X3 triple span', {(x,y):(8,11) for x in range(27,67) for y in range(8,12)},
+  None),
 ]
 allok=True
 for name,cols in tests:
@@ -82,7 +86,9 @@ for name,cols in tests:
         print(f'{name}: {len(dif)} diffs len {len(S)}/{len(D)} @{dif[:5]}' + ''.join(f' [{i}]{S[i]:02x}!={D[i]:02x}' for i in dif[:5]))
 for name,cols,mcs in mctests:
     n=name.split()[0]
-    don=mchunks(n); got=dg.build_multichunk(cols,mcs)
+    don=mchunks(n)
+    if mcs is None: mcs={k:v[1] for k,v in don.items()}
+    got=dg.build_multichunk(cols,mcs)
     for k in sorted(don):
         S=got.get(k); D=don[k][0]
         ok = S==D
