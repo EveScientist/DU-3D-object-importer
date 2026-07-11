@@ -517,7 +517,14 @@ def build_multichunk(cols, mc=606, chunk0=(8,8,8), smooth_fn=None):
             if not sub: continue
             key=(cx0+ci,cy0+cj,cz0+ck)
             m = mc[key] if isinstance(mc,dict) else mc
-            out[key]=build_scan_general(sub, m, smooth_fn=smooth_fn,
+            # smooth_fn is defined over GLOBAL coords; chunks work in local coords, so
+            # wrap with the chunk offset (field stays continuous across seams)
+            sf=None
+            if smooth_fn is not None:
+                def sf(x,y,z,_ox=lox,_oy=loy,_oz=loz):
+                    X,Y,Z=smooth_fn(x+_ox,y+_oy,z+_oz)
+                    return (X-_ox,Y-_oy,Z-_oz)
+            out[key]=build_scan_general(sub, m, smooth_fn=sf,
                 xseam_lo=xs_lo, xopen_hi=xs_hi,
                 yseam_lo=(yf-loy) if ys_lo else None,
                 yopen_hi=(hiy+1-loy) if ys_hi else None,
