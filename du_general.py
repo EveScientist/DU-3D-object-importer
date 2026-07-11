@@ -34,6 +34,13 @@ MULTI-CHUNK SEAMS (M3, donors 3178 X-box / 3187 Y-box / 3189 X-sphere markers):
     yseam_lo=Ylo: planes whose first col == Ylo replace the Y-lo opener with a B,T pair:
       B val = (234 - F_ylo) % 256 (= std opener + 35), T standard; boundary group planes
       merge opener+first transition into one token val+35.
+    zopen_hi / zseam_lo (ZC1 3376 / ZC2 3378): z carries to S (no phantom) / from S-2;
+      a zseam chunk's GROUP region clips intervals at S-1 (= local -1; columns entirely
+      below become ABSENT: zero heights, edge collapse, F/bnd anchors at -1). B/T are
+      SURFACE tokens: B exists unless both wall cols are bottom-cut, T exists unless both
+      are top-cut; B (and Y-hi) vals blank to 33 when the lag-window {a-1,a} is entirely
+      present-and-top-cut; T val blanks to 33 when both wall cols are bottom-cut.
+      Markers/boundary planes/openers: fully standard over the carried/clipped intervals.
   provisional layout hooks (1 donor each, flagged): xseam_lo -> grp_off += 10;
   yseam_lo -> grp_off += 2; pad -= 2 when nx==4 and maxnc in (5,6) (unpinned pad cell).
 
@@ -84,11 +91,25 @@ def _norm(cols):
     return out
 
 def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
-                       xseam_lo=False, xopen_hi=False, yseam_lo=None, yopen_hi=None):
+                       xseam_lo=False, xopen_hi=False, yseam_lo=None, yopen_hi=None,
+                       zseam_lo=False, zopen_hi=False):
     IV=_norm(cols)
     xs,planes=_planes_of(IV)
     nP=len(planes)
-    def ivs(x,y): return IV.get((x,y))
+    # Z-SPLIT (ZC1 3376 / ZC2 3378): markers use the carried intervals as passed
+    # (high chunk carries from S-2 = local -2; low chunk to S = local 32); the GROUP
+    # region of a zseam chunk clips at S-1 = local -1, columns entirely below become
+    # ABSENT (zero heights / edge collapse / F anchors at -1). AV switches from IV
+    # (marker phase) to GIV (group phase).
+    if zseam_lo:
+        GIV={}
+        for c,iv in IV.items():
+            cl=tuple((max(a,-1),b) for a,b in iv if b>=-1)
+            if cl: GIV[c]=cl
+    else:
+        GIV=IV
+    AV=IV
+    def ivs(x,y): return AV.get((x,y))
     def h(x,y):
         iv=ivs(x,y); return 0 if iv is None else iv[0][1]-iv[0][0]+1
     def zl(x,y):
@@ -98,7 +119,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     def span(x,y):
         iv=ivs(x,y); return 0 if iv is None else iv[-1][1]-iv[0][0]+1
     def Tlast_iv(x,y):
-        iv=ivs(x,y); return iv[-1][1]+1
+        iv=ivs(x,y); return -1 if iv is None else iv[-1][1]+1
+    def cut_top(x,y):
+        iv=ivs(x,y); return zopen_hi and iv is not None and iv[-1][1]>=32
+    def cut_bot(x,y):
+        return zseam_lo and (x,y) in GIV and IV[(x,y)][0][0]<=-2
     def extras(x,y):
         """[(igap, h_up, zlo_up, ztop_up)] per extra interval, ascending z.
         igap = empty voxels between it and the interval below."""
@@ -139,7 +164,8 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     def _F(p):
         """marker-opener F of plane index p (interior; p-1 may be a phantom plane)."""
         x=planes[p][0]; ys=mycols(p); xp=planes[p-1][0]; ysp=mycols(p-1)
-        return (35*(len(ysp)+len(ys)))//2 + Tlast_iv(xp,ysp[-1]) - zl(x,ys[0])
+        z0=zl(x,ys[0]); z0=-1 if z0 is None else z0
+        return (35*(len(ysp)+len(ys)))//2 + Tlast_iv(xp,ysp[-1]) - z0
     def _seam_marker_op():
         x=planes[0][0]; ys=mycols(0)
         return bnd_op_law(x, ys[0], zl(x,ys[0]))
@@ -159,13 +185,14 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             out+=_marker((34-hp+(zl(x,ys[c])-pv[0]))%256, h(x,ys[c]), b2)
             for ig,hu,_,_ in extras(x,ys[c]): out+=_marker((ig-1)%256,hu,b2)
         mplanes.append(out)
+    AV=GIV   # group phase reads group intervals
 
     # ---- groups ----
-    def vol(p): return sum(iv[1]-iv[0]+1 for y in mycols(p) for iv in ivs(planes[p][0],y))
+    def vol(p): return sum(iv[1]-iv[0]+1 for y in mycols(p) for iv in (ivs(planes[p][0],y) or ()))
     def Tlast(p):
         ysm=mycols(p); return Tlast_iv(planes[p][0],ysm[-1])
     def zfirst(p):
-        ysm=mycols(p); return zl(planes[p][0],ysm[0])
+        ysm=mycols(p); z=zl(planes[p][0],ysm[0]); return -1 if z is None else z
     def ncp(p): return len(mycols(p))
     def _ylo_F(g):
         # Y-lo opener F-forms (each byte-exact in its donor class):
@@ -180,15 +207,19 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     F=35*ncp(L) + Tlast(L) - zfirst(R)
                 else:               # deeper descent: shifted pair = marker-F(L)
                     F=_F(L)
-            elif vol(L)==vol(R):    # vol tie, equal nc: T := MAX column top of the pair.
-                # Pinned jointly by 3252 g2 (non-identical mirrored planes: X=16=maxT,
-                # NOT Tlast(L)=14, NOT the old owner-by-half _F(L) whose agreement at 16
-                # was coincidental) and PLT-MC 3367's identical-plane ties (X=12=maxT;
-                # _F(L)=11 rejected in-game: Deployments 11a-c invalid-vertex).
-                # max over BOTTOM-interval tops: OVH1/2 pin that a multi-interval column's
-                # upper intervals do NOT enter the tie max (donor 92 = base top 10).
-                mT=max(zt(planes[q][0],y) for q in (L,R) for y in mycols(q))
-                F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
+            elif vol(L)==vol(R):
+                # vol tie, equal nc. IDENTICAL planes -> own-pair form (= marker-F(R);
+                # 3367 h4/h4 ties + ZC1/ZC2 z-cut chunks, where maxT over carried tops
+                # would be wrong). NON-identical vol tie -> T := MAX bottom-interval
+                # column top of the pair (3252 g2 mirrored planes: X=16=maxT, NOT
+                # Tlast(L)=14; OVH1/2 pin that upper intervals stay OUT of the max).
+                if [ (y,ivs(planes[L][0],y)) for y in mycols(L) ] == \
+                   [ (y,ivs(planes[R][0],y)) for y in mycols(R) ]:
+                    F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
+                else:
+                    mT=max((zt(planes[q][0],y) for q in (L,R) for y in mycols(q)
+                            if ivs(planes[q][0],y) is not None), default=-1)
+                    F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
             else:                   # ascending/descending equal-nc: own-pair form
                 F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
         else:
@@ -243,14 +274,18 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             def pm(u,v):
                 vs=[zc.get(k) for k in (u,v) if zc.get(k) is not None]; return min(vs) if vs else 0
             if g==0:
-                b=bnd_op if bnd_op is not None else bnd_op_law(x,ys[0],zl(x,ys[0]))
+                z0g=zl(x,ys[0]); z0g=-1 if z0g is None else z0g
+                # zseam chunks: the group -X opener = bnd law at the GROUP z (S-1 = -1),
+                # NOT the marker bnd_op (which anchors at S-2) -- ZC1/ZC2: 75 = law(z=-1)+19
+                b=bnd_op if (bnd_op is not None and not zseam_lo) else bnd_op_law(x,ys[0],z0g)
                 op=(b+19)%256
             else:
                 # +X boundary: F = 35*mean(nc_prev,nc_last) + max(Tlast(last),Tlast(prev))
                 #              - zlo_first(last)   (reduces to all flat/curved donor forms)
                 ysm=mycols(p); ysm2=mycols(p-1)
                 Tl=Tlast_iv(x,ysm[-1]); Tp=Tlast_iv(planes[p-1][0],ysm2[-1])
-                F=(35*(len(ysm2)+len(ysm)))//2 + max(Tl,Tp) - zl(x,ysm[0])
+                z0g=zl(x,ysm[0]); z0g=-1 if z0g is None else z0g
+                F=(35*(len(ysm2)+len(ysm)))//2 + max(Tl,Tp) - z0g
                 op=(199-F)%256
             cstart=1
             if sm:  # y-seam: merge opener + first transition into one wall token, val+35
@@ -261,15 +296,19 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 _upwall_bnd(toks,smooth,ex[0],[],g,ys[0])     # Y-lo edge wall uppers
             for c in range(cstart,nc):
                 sp2=ss[c-2] if c>=2 else 0
-                bs=pm(c-1,c)-pm(c-2,c-1) if c>=2 else pm(c-1,c)-zc[c-1]
+                zc1=zc[c-1] if zc[c-1] is not None else pm(c-1,c)
+                bs=pm(c-1,c)-pm(c-2,c-1) if c>=2 else pm(c-1,c)-zc1
                 r=max(hs[c],hs[c-1])
-                toks.append(((33-max(ss[c-1],sp2)+bs)%256, r)); smooth.append((g,ys[c],min(zc[c-1],zc[c])))
+                zmin=[v for v in (zc[c-1],zc[c]) if v is not None]
+                toks.append(((33-max(ss[c-1],sp2)+bs)%256, r)); smooth.append((g,ys[c],min(zmin) if zmin else None))
                 _upwall_bnd(toks,smooth,ex[c-1],ex[c],g,ys[c])
             if not ph:
                 ss2=ss[-2] if nc>=2 else 0
                 z2=zc[nc-2] if nc>=2 else zc[nc-1]
-                toks.append(((33-max(ss[-1],ss2)+max(0,zc[nc-1]-z2))%256, hs[-1]))
-                smooth.append((g,ys[-1]+1,zc[nc-1]))
+                zn=zc[nc-1]
+                dz=(zn-z2) if (zn is not None and z2 is not None) else 0
+                toks.append(((33-max(ss[-1],ss2)+max(0,dz))%256, hs[-1]))
+                smooth.append((g,ys[-1]+1,zn))
                 _upwall_bnd(toks,smooth,ex[-1],[],g,ys[-1]+1) # Y-hi edge wall uppers
             return toks,smooth
         L,R=g-1,g
@@ -285,9 +324,16 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
         for y in range(u0-3,u1+4):
             vs=[v for v in (zl(xL,y),zl(xR,y)) if v is not None]
             zc[y]=min(vs) if vs else None
-        def pm(u,v):
+        def pmv(u,v):
             vs=[zc.get(k) for k in (u,v)]; vs=[k for k in vs if k is not None]
-            return min(vs) if vs else 0
+            return min(vs) if vs else None
+        def pm(u,v):
+            r=pmv(u,v); return 0 if r is None else r
+        def bsf(u,v,p,q):
+            """pairwise-min delta pm(u,v)-pm(p,q); a window with NO data contributes
+            nothing (bs=0) -- ZC2c2: group-absent cols must not anchor at 0."""
+            A=pmv(u,v); B=pmv(p,q)
+            return 0 if (A is None or B is None) else A-B
         wstart=u0+1
         if sm:  # y-seam entry: std pair at wall S-1 (=u0+1) with B val := 234 - F_ylo
             a,b=u0,u0+1
@@ -304,24 +350,40 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
         else:
             toks=[((199-_ylo_F(g))%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(g,u0,zc[u0])]
             _upwall(toks,smooth,[],colex(u0),g,u0)            # Y-lo edge wall uppers
+        def pres(y): return ivs(xL,y) is not None or ivs(xR,y) is not None
+        def ctop(y): return cut_top(xL,y) or cut_top(xR,y)
+        def cbot(y): return cut_bot(xL,y) or cut_bot(xR,y)
         for yw in range(wstart,u1+1):
             a,b=yw-1,yw
-            ea=((xL,a) in IV)!=((xR,a) in IV); eb=((xL,b) in IV)!=((xR,b) in IV)
-            hp2=t.get(a-1,0); bs=pm(a,b)-pm(a-1,a)
+            ea=(ivs(xL,a) is not None)!=(ivs(xR,a) is not None)
+            eb=(ivs(xL,b) is not None)!=(ivs(xR,b) is not None)
+            hp2=t.get(a-1,0); bs=bsf(a,b,a-1,a)
             bval=(33-max(t[a],hp2)+bs)%256
-            if ea or eb:
+            if ea or eb or not pres(a) or not pres(b):
+                # edge wall incl group-absent columns (z-clipped away: ZC2c2 (33,3))
                 toks.append((bval,max(t[a],t[b]))); smooth.append((g,yw,min(x for x in (zc[a],zc[b]) if x is not None)))
             else:
-                zloc=[z for z in (zl(xL,a),zl(xL,b),zl(xR,a),zl(xR,b))]
-                ztc =[z for z in (zt(xL,a),zt(xL,b),zt(xR,a),zt(xR,b))]
-                hc  =[h(xL,a),h(xL,b),h(xR,a),h(xR,b)]
-                toks.append((bval,max(zloc)-min(zloc))); smooth.append((g,yw,min(zloc)))
-                toks.append(((min(hc)-2)%256,max(ztc)-min(ztc))); smooth.append((g,yw,min(ztc)))
+                # B/T are SURFACE tokens (ZC1/ZC2): B exists unless both cols lack a real
+                # bottom (cut_bot); T exists unless both lack a real top (cut_top).
+                # B val blanks to 33 when its lag-window {a-1,a} is entirely
+                # present-and-top-cut; T val blanks to 33 when both cols are bottom-cut.
+                if not (cbot(a) and cbot(b)):
+                    zloc=[z for z in (zl(xL,a),zl(xL,b),zl(xR,a),zl(xR,b)) if z is not None]
+                    bv = 33 if (ctop(a) and pres(a-1) and ctop(a-1)) else bval
+                    toks.append((bv,max(zloc)-min(zloc))); smooth.append((g,yw,min(zloc)))
+                if not (ctop(a) and ctop(b)):
+                    ztc=[z for z in (zt(xL,a),zt(xL,b),zt(xR,a),zt(xR,b)) if z is not None]
+                    hc =[v for v in (h(xL,a),h(xL,b),h(xR,a),h(xR,b)) if v>0]
+                    tv = 33 if (cbot(a) and cbot(b)) else (min(hc)-2)%256
+                    toks.append((tv,max(ztc)-min(ztc))); smooth.append((g,yw,min(ztc)))
             _upwall(toks,smooth,colex(a),colex(b),g,yw)       # this wall's upper deck(s)
         if not ph:
             a,b=u1,u1+1
-            toks.append(((33-max(t[a],t.get(a-1,0))+(pm(a,b)-pm(a-1,a)))%256,
-                         max(h(xL,u1) or 0,h(xR,u1) or 0)))
+            if ctop(u1) and pres(u1-1) and ctop(u1-1):
+                val=33          # Y-hi lag-window entirely top-cut (ZC1c1: (33,6))
+            else:
+                val=(33-max(t[a],t.get(a-1,0))+bsf(a,b,a-1,a))%256
+            toks.append((val, max(h(xL,u1) or 0,h(xR,u1) or 0)))
             smooth.append((g,u1+1,zc[u1]))
             _upwall(toks,smooth,colex(u1),[],g,b)             # Y-hi edge wall uppers
         return toks,smooth
@@ -400,33 +462,50 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
 
 def build_multichunk(cols, mc=606, chunk0=(8,8,8), smooth_fn=None):
     """Split GLOBAL cols (construct-local voxel coords, chunk0 covers 0..31 per axis) at
-    32-voxel chunk boundaries in X and Y -> {(cx,cy,cz): scan}. mc: int, or dict keyed by
-    chunk. Z-splits not yet implemented (single z-chunk shapes only).
-    Split rule (byte-exact vs 3178/3187): a chunk carries planes/cols up to S=next boundary
-    (one past its own range) plus a phantom plane/col S+1 for group math (open/uncapped
-    high side); a chunk whose shape continues below carries from S-2 (negative local
-    coords) with seam entry forms."""
+    32-voxel chunk boundaries in X, Y and Z -> {(cx,cy,cz): scan}. mc: int, or dict keyed
+    by chunk.
+    Split rule (byte-exact vs 3178/3187/3367 X/Y, 3376/3378 Z): a chunk carries
+    planes/cols/z up to S=next boundary (one past its own range) plus, for X/Y, a phantom
+    plane/col at S+1 for group math (open/uncapped high side); a chunk whose shape
+    continues below carries from S-2 (negative local coords) with seam entry forms
+    (Z: markers from S-2, group region clips at S-1 inside build_scan_general)."""
     IV=_norm(cols)
     xs=[x for x,_ in IV]; ys=[y for _,y in IV]
-    sx0,sx1=min(xs),max(xs); sy0,sy1=min(ys),max(ys)
+    zs=[v for iv in IV.values() for ab in iv for v in ab]
+    sx0,sx1=min(xs),max(xs); sy0,sy1=min(ys),max(ys); sz0,sz1=min(zs),max(zs)
     cx0,cy0,cz0=chunk0
     out={}
     for ci in range(sx0//32, sx1//32+1):
-        for cj in range(sy0//32, sy1//32+1):
+      for cj in range(sy0//32, sy1//32+1):
+        for ck in range(sz0//32, sz1//32+1):
             lox,hix=32*ci,32*ci+31
             loy,hiy=32*cj,32*cj+31
-            if not any(lox<=x<=hix and loy<=y<=hiy for x,y in IV): continue
+            loz,hiz=32*ck,32*ck+31
             xs_lo = sx0<lox; xs_hi = sx1>hix
             ys_lo = sy0<loy; ys_hi = sy1>hiy
+            zs_lo = sz0<loz; zs_hi = sz1>hiz
             xf = lox-2 if xs_lo else sx0
             xt = hix+2 if xs_hi else sx1       # hix+1 carried + hix+2 phantom
             yf = loy-2 if ys_lo else sy0
             yt = hiy+2 if ys_hi else sy1       # hiy+1 carried + hiy+2 phantom
-            sub={(x-lox,y-loy):iv for (x,y),iv in IV.items() if xf<=x<=xt and yf<=y<=yt}
-            key=(cx0+ci,cy0+cj,cz0)
+            zf = loz-2 if zs_lo else sz0
+            zt_ = hiz+1 if zs_hi else sz1      # z carries to S, no phantom
+            # chunk must OWN some voxels (not just overlap carry)
+            if not any(lox<=x<=hix and loy<=y<=hiy and
+                       any(b>=loz and a<=hiz for a,b in iv)
+                       for (x,y),iv in IV.items()): continue
+            sub={}
+            for (x,y),iv in IV.items():
+                if not (xf<=x<=xt and yf<=y<=yt): continue
+                cl=tuple((max(a,zf)-loz, min(b,zt_)-loz) for a,b in iv
+                         if b>=zf and a<=zt_)
+                if cl: sub[(x-lox,y-loy)]=cl
+            if not sub: continue
+            key=(cx0+ci,cy0+cj,cz0+ck)
             m = mc[key] if isinstance(mc,dict) else mc
             out[key]=build_scan_general(sub, m, smooth_fn=smooth_fn,
                 xseam_lo=xs_lo, xopen_hi=xs_hi,
                 yseam_lo=(yf-loy) if ys_lo else None,
-                yopen_hi=(hiy+1-loy) if ys_hi else None)
+                yopen_hi=(hiy+1-loy) if ys_hi else None,
+                zseam_lo=zs_lo, zopen_hi=zs_hi)
     return out

@@ -64,6 +64,10 @@ mctests=[
   {(8,8,8):755,(9,8,8):641}),
  ('3187 Y-seam box', {(x,y):(8,11) for x in range(8,12) for y in range(27,35)},
   {(8,8,8):657,(8,9,8):683}),
+ ('3376 Z-seam box', {(x,y):(27,34) for x in range(8,12) for y in range(8,12)},
+  {(8,8,8):603,(8,8,9):633}),
+ ('3378 Z-seam steps', {(x,y):(27,[30,33,35,30][y-8]) for x in range(8,11) for y in range(8,12)},
+  {(8,8,8):550,(8,8,9):582}),
 ]
 allok=True
 for name,cols in tests:
