@@ -19,8 +19,22 @@ def voxel_header(cx, cy, cz):
     return bytes(h)
 
 
+def _scan_b2(scan):
+    """Plateau byte-2 of the scan's first marker (offset lead+2; lead = where the
+    leading 00/ff background alternation breaks). The material tail's penultimate
+    byte must MATCH it or the mesher rejects the body ('Deserializing invalid
+    vertex' -- OCC3 3325 lesson, re-hit by Deployment 11 multi-chunk ramp)."""
+    i = 0
+    while i < len(scan) and scan[i] == (0 if i % 2 == 0 else 0xff):
+        i += 1
+    if i + 4 < len(scan) and scan[i + 1] == 1:
+        return scan[i + 2]
+    return 2
+
+
 def encode_voxel_b64(cx, cy, cz, scan, mc):
-    blob = voxel_header(cx, cy, cz) + scan + struct.pack('<I', mc) + MAT_TAIL
+    tail = MAT_TAIL[:-2] + bytes([_scan_b2(scan)]) + MAT_TAIL[-1:]
+    blob = voxel_header(cx, cy, cz) + scan + struct.pack('<I', mc) + tail
     comp = lz4.block.compress(blob, store_size=False)
     raw = b'\xf9\xb6\x14\xfb' + struct.pack('<I', len(blob)) + b'\x00\x00\x00\x00' + comp
     return base64.b64encode(raw).decode(), du_hash.to_signed64(du_hash.compute_hash(raw))
