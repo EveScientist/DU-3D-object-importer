@@ -75,7 +75,7 @@ def lead_law(x,y):
     if x<8 and yt!=0: yt+=2
     return 99 + (48*(x-8))//5 + yt
 def _mkband(s): return 8 if s<=12 else (6 if s<=28 else (4 if s<=42 else 2))
-def _gband(s):  return 8 if s<=10 else (6 if s<=28 else (4 if s<=42 else 2))
+def _gband(s):  return 8 if s<=10 else (6 if s<=24 else (4 if s<=40 else 2))  # group bands sit LOWER than marker bands (3189/3191 groups: 26->4, 42->2, 40->4)
 
 def _planes_of(cols):
     xs=sorted({x for x,_ in cols})
@@ -151,15 +151,16 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     flat = all(iv[0][0]==z00 for iv in IV.values())
 
     # ---- plateau byte2 (over emitted marker planes) ----
-    # b2 counts an identical-COLUMN-SET run only when bounded on BOTH sides by strictly
-    # NARROWER planes (isolated widest section, OCC3 [3,(5,5,5),3] -> 3). Heights are
-    # irrelevant (ramp 3367 b2=2 despite h-plateaus; killed Deployments 11a-c), and
-    # edge-touching or wider-bounded runs don't count (3189/3191 spheres: nc24 run at
-    # chunk edge, nc22 run bounded by 24 -> both b2=2).
+    # b2 counts a run of FULLY IDENTICAL planes (col-sets AND intervals) bounded on BOTH
+    # sides by planes with strictly NARROWER col-sets (OCC3 [3,(5,5,5),3] -> 3). Height
+    # plateaus with equal-width bounds don't count (ramp 3367 b2=2, killed Deployments
+    # 11a-c); widest runs with differing heights don't either (3191's six nc-20 planes,
+    # b2=2); edge-touching runs don't (3189c1).
+    pdat=[tuple((y,IV[(planes[p][0],y)]) for y in mycols(p)) for p in range(m1)]
     csets=[frozenset(mycols(p)) for p in range(m1)]
     b2=2; s=0
     for e in range(1,m1+1):
-        if e==m1 or csets[e]!=csets[s]:
+        if e==m1 or pdat[e]!=pdat[s]:
             if (e-s)>=2 and s>0 and e<m1 and \
                len(csets[s-1])<len(csets[s]) and len(csets[e])<len(csets[s]):
                 b2=max(b2,e-s)
@@ -241,7 +242,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 own = R if vR1>=vL1 else L
             F=_F(own)
         return F
-    def _upwall(toks,smooth,ua,ub,g,yw):
+    def _upwall(toks,smooth,ua,ub,gx,yw):
         """Upper-deck tokens of wall yw between cols a,b (ua/ub = extras lists, layer-
         aligned). One side only -> single wall token (igap-2, h_up). BOTH sides -> the
         uppers PAIR into their own (B_up, T_up) with spread runs (OVH4 3374: second
@@ -252,12 +253,12 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             A=ua[k] if k<len(ua) else None
             B=ub[k] if k<len(ub) else None
             if A and B:
-                toks.append(((min(A[0],B[0])-2)%256, abs(A[2]-B[2]))); smooth.append((g,yw,min(A[2],B[2])))
-                toks.append(((min(A[1],B[1])-2)%256, abs(A[3]-B[3]))); smooth.append((g,yw,min(A[3],B[3])))
+                toks.append(((min(A[0],B[0])-2)%256, abs(A[2]-B[2]))); smooth.append((gx,yw,min(A[2],B[2])))
+                toks.append(((min(A[1],B[1])-2)%256, abs(A[3]-B[3]))); smooth.append((gx,yw,min(A[3],B[3])))
             else:
                 C=A or B
-                toks.append(((C[0]-2)%256, C[1])); smooth.append((g,yw,C[2]))
-    def _upwall_bnd(toks,smooth,ua,ub,g,yw):
+                toks.append(((C[0]-2)%256, C[1])); smooth.append((gx,yw,C[2]))
+    def _upwall_bnd(toks,smooth,ua,ub,gx,yw):
         """Boundary-plane upper tokens: single all-wall token per layer even when both
         cols have uppers (OVH4 boundary): val = min(igap)-2, run = max(h_up)."""
         for k in range(max(len(ua),len(ub))):
@@ -265,8 +266,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             B=ub[k] if k<len(ub) else None
             ig=min(x[0] for x in (A,B) if x); hu=max(x[1] for x in (A,B) if x)
             zu=min(x[2] for x in (A,B) if x)
-            toks.append(((ig-2)%256,hu)); smooth.append((g,yw,zu))
+            toks.append(((ig-2)%256,hu)); smooth.append((gx,yw,zu))
     def group_plane(g):
+        gx=planes[0][0]+g   # ACTUAL x grid line (line g between voxel planes g-1,g);
+                            # smooth nominals must use real coords, not the index
+                            # (Deployment 12 bug: dome field evaluated at x=0..8)
         toks=[]
         smooth=[]  # per token: (x_g, y_g, zbase) or (.., None) for upper-interval tokens
         if (g==0 and not xseam_lo) or (g==nP and not xopen_hi):
@@ -294,27 +298,27 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 op=(199-F)%256
             cstart=1
             if sm:  # y-seam: merge opener + first transition into one wall token, val+35
-                toks.append(((op+35)%256, max(hs[0],hs[1]))); smooth.append((g,ys[1],min(zc[0],zc[1])))
+                toks.append(((op+35)%256, max(hs[0],hs[1]))); smooth.append((gx,ys[1],min(zc[0],zc[1])))
                 cstart=2
             else:
-                toks.append((op,hs[0])); smooth.append((g,ys[0],zc[0]))
-                _upwall_bnd(toks,smooth,ex[0],[],g,ys[0])     # Y-lo edge wall uppers
+                toks.append((op,hs[0])); smooth.append((gx,ys[0],zc[0]))
+                _upwall_bnd(toks,smooth,ex[0],[],gx,ys[0])     # Y-lo edge wall uppers
             for c in range(cstart,nc):
                 sp2=ss[c-2] if c>=2 else 0
                 zc1=zc[c-1] if zc[c-1] is not None else pm(c-1,c)
                 bs=pm(c-1,c)-pm(c-2,c-1) if c>=2 else pm(c-1,c)-zc1
                 r=max(hs[c],hs[c-1])
                 zmin=[v for v in (zc[c-1],zc[c]) if v is not None]
-                toks.append(((33-max(ss[c-1],sp2)+bs)%256, r)); smooth.append((g,ys[c],min(zmin) if zmin else None))
-                _upwall_bnd(toks,smooth,ex[c-1],ex[c],g,ys[c])
+                toks.append(((33-max(ss[c-1],sp2)+bs)%256, r)); smooth.append((gx,ys[c],min(zmin) if zmin else None))
+                _upwall_bnd(toks,smooth,ex[c-1],ex[c],gx,ys[c])
             if not ph:
                 ss2=ss[-2] if nc>=2 else 0
                 z2=zc[nc-2] if nc>=2 else zc[nc-1]
                 zn=zc[nc-1]
                 dz=(zn-z2) if (zn is not None and z2 is not None) else 0
                 toks.append(((33-max(ss[-1],ss2)+max(0,dz))%256, hs[-1]))
-                smooth.append((g,ys[-1]+1,zn))
-                _upwall_bnd(toks,smooth,ex[-1],[],g,ys[-1]+1) # Y-hi edge wall uppers
+                smooth.append((gx,ys[-1]+1,zn))
+                _upwall_bnd(toks,smooth,ex[-1],[],gx,ys[-1]+1) # Y-hi edge wall uppers
             return toks,smooth
         L,R=g-1,g
         xL,ysL=planes[L]; xR,ysR=planes[R]
@@ -348,16 +352,16 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             ztc =[z for z in (zt(xL,a),zt(xL,b),zt(xR,a),zt(xR,b)) if z is not None]
             hc  =[v for v in (h(xL,a),h(xL,b),h(xR,a),h(xR,b)) if v>0]
             bsm=(_seam_marker_op()-1)%256 if (g==g0 and xseam_lo) else (234-_ylo_F(g))%256
-            toks=[(bsm, max(zloc)-min(zloc))]; smooth=[(g,b,min(zloc))]
-            toks.append(((min(hc)-2)%256, max(ztc)-min(ztc))); smooth.append((g,b,min(ztc)))
+            toks=[(bsm, max(zloc)-min(zloc))]; smooth=[(gx,b,min(zloc))]
+            toks.append(((min(hc)-2)%256, max(ztc)-min(ztc))); smooth.append((gx,b,min(ztc)))
             wstart=u0+2
         elif g==g0 and xseam_lo:  # x-seam entry line (S-1): interior form, opener = seam - 36
             # opener run: BOTTOM-interval height of col u0 (OVH4: 2 not span 6)
-            toks=[((_seam_marker_op()-36)%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(g,u0,zc[u0])]
-            _upwall(toks,smooth,[],colex(u0),g,u0)            # Y-lo edge wall uppers
+            toks=[((_seam_marker_op()-36)%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(gx,u0,zc[u0])]
+            _upwall(toks,smooth,[],colex(u0),gx,u0)            # Y-lo edge wall uppers
         else:
-            toks=[((199-_ylo_F(g))%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(g,u0,zc[u0])]
-            _upwall(toks,smooth,[],colex(u0),g,u0)            # Y-lo edge wall uppers
+            toks=[((199-_ylo_F(g))%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(gx,u0,zc[u0])]
+            _upwall(toks,smooth,[],colex(u0),gx,u0)            # Y-lo edge wall uppers
         def pres(y): return ivs(xL,y) is not None or ivs(xR,y) is not None
         def ctop(y): return cut_top(xL,y) or cut_top(xR,y)
         def cbot(y): return cut_bot(xL,y) or cut_bot(xR,y)
@@ -369,7 +373,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             bval=(33-max(t[a],hp2)+bs)%256
             if ea or eb or not pres(a) or not pres(b):
                 # edge wall incl group-absent columns (z-clipped away: ZC2c2 (33,3))
-                toks.append((bval,max(t[a],t[b]))); smooth.append((g,yw,min(x for x in (zc[a],zc[b]) if x is not None)))
+                toks.append((bval,max(t[a],t[b]))); smooth.append((gx,yw,min(x for x in (zc[a],zc[b]) if x is not None)))
             else:
                 # B/T are SURFACE tokens (ZC1/ZC2): B exists unless both cols lack a real
                 # bottom (cut_bot); T exists unless both lack a real top (cut_top).
@@ -378,13 +382,13 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 if not (cbot(a) and cbot(b)):
                     zloc=[z for z in (zl(xL,a),zl(xL,b),zl(xR,a),zl(xR,b)) if z is not None]
                     bv = 33 if (ctop(a) and pres(a-1) and ctop(a-1)) else bval
-                    toks.append((bv,max(zloc)-min(zloc))); smooth.append((g,yw,min(zloc)))
+                    toks.append((bv,max(zloc)-min(zloc))); smooth.append((gx,yw,min(zloc)))
                 if not (ctop(a) and ctop(b)):
                     ztc=[z for z in (zt(xL,a),zt(xL,b),zt(xR,a),zt(xR,b)) if z is not None]
                     hc =[v for v in (h(xL,a),h(xL,b),h(xR,a),h(xR,b)) if v>0]
                     tv = 33 if (cbot(a) and cbot(b)) else (min(hc)-2)%256
-                    toks.append((tv,max(ztc)-min(ztc))); smooth.append((g,yw,min(ztc)))
-            _upwall(toks,smooth,colex(a),colex(b),g,yw)       # this wall's upper deck(s)
+                    toks.append((tv,max(ztc)-min(ztc))); smooth.append((gx,yw,min(ztc)))
+            _upwall(toks,smooth,colex(a),colex(b),gx,yw)       # this wall's upper deck(s)
         if not ph:
             a,b=u1,u1+1
             if ctop(u1) and pres(u1-1) and ctop(u1-1):
@@ -392,8 +396,8 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             else:
                 val=(33-max(t[a],t.get(a-1,0))+bsf(a,b,a-1,a))%256
             toks.append((val, max(h(xL,u1) or 0,h(xR,u1) or 0)))
-            smooth.append((g,u1+1,zc[u1]))
-            _upwall(toks,smooth,colex(u1),[],g,b)             # Y-hi edge wall uppers
+            smooth.append((gx,u1+1,zc[u1]))
+            _upwall(toks,smooth,colex(u1),[],gx,b)             # Y-hi edge wall uppers
         return toks,smooth
 
     glines=list(range(g0,g1+1))
@@ -441,6 +445,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     elif 7<=maxnc<=8: pad=241-9*nx
     else: pad=246-10*nx        # nc4,6,12,16 (B12/B16) all on this line
     if nx==4 and maxnc in (5,6): pad-=2   # provisional kink (3187 both chunks)
+    if nx>=20: pad+=6                     # provisional kink (3191 nx20: pad 52; 3189 nx13/14 classic; nx15-19 unseen)
     if lead is None:
         lead=lead_law(planes[0][0], mycols(0)[0])
     markerspan=sum(len(m) for m in mplanes)+sum(mkgaps)
