@@ -1,0 +1,439 @@
+{
+  "(1,1,2)": {
+    "voxel_decoded": {
+      "header": {
+        "magic": "0x27b8a013",
+        "field1": 6,
+        "field2": "0xe881339e",
+        "h_level": 9,
+        "origin_x": 31,
+        "origin_y": 31,
+        "origin_z": 63,
+        "dim_a": 35,
+        "dim_b": 35,
+        "dim_c": 35,
+        "chunk_x": 32,
+        "chunk_y": 32,
+        "chunk_z": 64,
+        "size_x": 32,
+        "size_y": 32,
+        "size_z": 32
+      },
+      "scan_length_pairs": 327,
+      "scan_annotated": [
+        {
+          "pairs": "167",
+          "hex": "007a",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x00",
+          "b1": "0x7a"
+        }
+      ],
+      "scan_hex": "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff007a00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff",
+      "mat": {
+        "byte0": "0x00",
+        "bytes_1_12": "ff00ff00ff00ff00ff00ff00",
+        "debug_tag": "\ufffd\u0000\ufffd\u0000z\u0001",
+        "bytes_19_29": "000000c768690900000000",
+        "material_name": "Debug1",
+        "bytes_38_39": "0101",
+        "raw": "00ff00ff00ff00ff00ff00ff00ff00ff007a01000000c76869090000000044656275673100000101"
+      }
+    },
+    "meta_decoded": {
+      "magic": "0xc0f3819f",
+      "field_4": 8,
+      "type_flags": "0x0901",
+      "blueprint_id": "3b853096377d6299",
+      "bytes_18_27": "01000000000000000001",
+      "field_28": 0,
+      "field_32_35": "00000000",
+      "total_length": 347,
+      "raw_hex": "c0f3819f0800000009013b853096377d62990100000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "(1,2,2)": {
+    "voxel_decoded": {
+      "header": {
+        "magic": "0x27b8a013",
+        "field1": 6,
+        "field2": "0xe881339e",
+        "h_level": 9,
+        "origin_x": 31,
+        "origin_y": 63,
+        "origin_z": 63,
+        "dim_a": 35,
+        "dim_b": 35,
+        "dim_c": 35,
+        "chunk_x": 32,
+        "chunk_y": 64,
+        "chunk_z": 64,
+        "size_x": 32,
+        "size_y": 32,
+        "size_z": 32
+      },
+      "scan_length_pairs": 327,
+      "scan_annotated": [
+        {
+          "pairs": "167",
+          "hex": "007a",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x00",
+          "b1": "0x7a"
+        }
+      ],
+      "scan_hex": "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff007a00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff",
+      "mat": {
+        "byte0": "0x00",
+        "bytes_1_12": "ff00ff00ff00ff00ff00ff00",
+        "debug_tag": "\ufffd\u0000\ufffd\u0000z\u0001",
+        "bytes_19_29": "000000c768690900000000",
+        "material_name": "Debug1",
+        "bytes_38_39": "0101",
+        "raw": "00ff00ff00ff00ff00ff00ff00ff00ff007a01000000c76869090000000044656275673100000101"
+      }
+    },
+    "meta_decoded": {
+      "magic": "0xc0f3819f",
+      "field_4": 8,
+      "type_flags": "0x0901",
+      "blueprint_id": "50bb9a1c17703dcf",
+      "bytes_18_27": "01000000000000000001",
+      "field_28": 0,
+      "field_32_35": "00000000",
+      "total_length": 347,
+      "raw_hex": "c0f3819f08000000090150bb9a1c17703dcf0100000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "(2,1,2)": {
+    "voxel_decoded": {
+      "header": {
+        "magic": "0x27b8a013",
+        "field1": 6,
+        "field2": "0xe881339e",
+        "h_level": 9,
+        "origin_x": 63,
+        "origin_y": 31,
+        "origin_z": 63,
+        "dim_a": 35,
+        "dim_b": 35,
+        "dim_c": 35,
+        "chunk_x": 64,
+        "chunk_y": 32,
+        "chunk_z": 64,
+        "size_x": 32,
+        "size_y": 32,
+        "size_z": 32
+      },
+      "scan_length_pairs": 327,
+      "scan_annotated": [
+        {
+          "pairs": "167",
+          "hex": "007a",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x00",
+          "b1": "0x7a"
+        }
+      ],
+      "scan_hex": "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff007a00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff",
+      "mat": {
+        "byte0": "0x00",
+        "bytes_1_12": "ff00ff00ff00ff00ff00ff00",
+        "debug_tag": "\ufffd\u0000\ufffd\u0000z\u0001",
+        "bytes_19_29": "000000c768690900000000",
+        "material_name": "Debug1",
+        "bytes_38_39": "0101",
+        "raw": "00ff00ff00ff00ff00ff00ff00ff00ff007a01000000c76869090000000044656275673100000101"
+      }
+    },
+    "meta_decoded": {
+      "magic": "0xc0f3819f",
+      "field_4": 8,
+      "type_flags": "0x0901",
+      "blueprint_id": "0f9da174f365d6eb",
+      "bytes_18_27": "01000000000000000001",
+      "field_28": 0,
+      "field_32_35": "00000000",
+      "total_length": 347,
+      "raw_hex": "c0f3819f0800000009010f9da174f365d6eb0100000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "(2,2,1)": {
+    "voxel_decoded": {
+      "header": {
+        "magic": "0x27b8a013",
+        "field1": 6,
+        "field2": "0xe881339e",
+        "h_level": 9,
+        "origin_x": 63,
+        "origin_y": 63,
+        "origin_z": 31,
+        "dim_a": 35,
+        "dim_b": 35,
+        "dim_c": 35,
+        "chunk_x": 64,
+        "chunk_y": 64,
+        "chunk_z": 32,
+        "size_x": 32,
+        "size_y": 32,
+        "size_z": 32
+      },
+      "scan_length_pairs": 351,
+      "scan_annotated": [
+        {
+          "pairs": "83..85",
+          "hex": "00cd01020000",
+          "type": "DECLARATION",
+          "CV": "0xcd",
+          "de": 0
+        },
+        {
+          "pairs": "169",
+          "hex": "ab00",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0xab",
+          "b1": "0x00"
+        },
+        {
+          "pairs": "248",
+          "hex": "e001",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0xe0",
+          "b1": "0x01"
+        },
+        {
+          "pairs": "249..256",
+          "hex": "017e7e7e01002001017e7e7e0100ff00",
+          "type": "FG_GROUP",
+          "inner0": "0x7e",
+          "byte7": "0x01",
+          "inner1": "0x7e",
+          "byte15": "0x00"
+        },
+        {
+          "pairs": "260",
+          "hex": "a301",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0xa3",
+          "b1": "0x01"
+        },
+        {
+          "pairs": "261..268",
+          "hex": "017e7e7e01002001017e7e7e0100ff00",
+          "type": "FG_GROUP",
+          "inner0": "0x7e",
+          "byte7": "0x01",
+          "inner1": "0x7e",
+          "byte15": "0x00"
+        }
+      ],
+      "scan_hex": "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00cd01020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ab00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00e001017e7e7e01002001017e7e7e0100ff00ff00ff00ff00a301017e7e7e01002001017e7e7e0100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00",
+      "mat": {
+        "byte0": "0xab",
+        "bytes_1_12": "02000000c768690900000000",
+        "debug_tag": "Debug1",
+        "bytes_19_29": "000001f9f2c81a00000000",
+        "material_name": "hcAlumin",
+        "bytes_38_39": "0201",
+        "raw": "ab02000000c768690900000000446562756731000001f9f2c81a000000006863416c756d696e0201"
+      }
+    },
+    "meta_decoded": {
+      "magic": "0xc0f3819f",
+      "field_4": 8,
+      "type_flags": "0x0901",
+      "blueprint_id": "012ed0e0cbc84059",
+      "bytes_18_27": "01000000000000000001",
+      "field_28": 0,
+      "field_32_35": "00000000",
+      "total_length": 347,
+      "raw_hex": "c0f3819f080000000901012ed0e0cbc840590100000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "(2,2,2)": {
+    "voxel_decoded": {
+      "header": {
+        "magic": "0x27b8a013",
+        "field1": 6,
+        "field2": "0xe881339e",
+        "h_level": 9,
+        "origin_x": 63,
+        "origin_y": 63,
+        "origin_z": 63,
+        "dim_a": 35,
+        "dim_b": 35,
+        "dim_c": 35,
+        "chunk_x": 64,
+        "chunk_y": 64,
+        "chunk_z": 64,
+        "size_x": 32,
+        "size_y": 32,
+        "size_z": 32
+      },
+      "scan_length_pairs": 351,
+      "scan_annotated": [
+        {
+          "pairs": "83..85",
+          "hex": "00ad01020300",
+          "type": "DECLARATION",
+          "CV": "0xad",
+          "de": 3
+        },
+        {
+          "pairs": "169",
+          "hex": "c800",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0xc8",
+          "b1": "0x00"
+        },
+        {
+          "pairs": "248",
+          "hex": "c001",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0xc0",
+          "b1": "0x01"
+        },
+        {
+          "pairs": "249",
+          "hex": "047e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "250",
+          "hex": "7e7e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x7e",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "251",
+          "hex": "0400",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x00"
+        },
+        {
+          "pairs": "252",
+          "hex": "1d01",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x1d",
+          "b1": "0x01"
+        },
+        {
+          "pairs": "253",
+          "hex": "047e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "254",
+          "hex": "7e7e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x7e",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "255",
+          "hex": "0400",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x00"
+        },
+        {
+          "pairs": "260",
+          "hex": "a001",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0xa0",
+          "b1": "0x01"
+        },
+        {
+          "pairs": "261",
+          "hex": "047e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "262",
+          "hex": "7e7e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x7e",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "263",
+          "hex": "0400",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x00"
+        },
+        {
+          "pairs": "264",
+          "hex": "1d01",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x1d",
+          "b1": "0x01"
+        },
+        {
+          "pairs": "265",
+          "hex": "047e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "266",
+          "hex": "7e7e",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x7e",
+          "b1": "0x7e"
+        },
+        {
+          "pairs": "267",
+          "hex": "0400",
+          "type": "MARKER_or_UNKNOWN",
+          "b0": "0x04",
+          "b1": "0x00"
+        }
+      ],
+      "scan_hex": "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ad01020300ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00c800ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00c001047e7e7e04001d01047e7e7e0400ff00ff00ff00ff00a001047e7e7e04001d01047e7e7e0400ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00",
+      "mat": {
+        "byte0": "0xc8",
+        "bytes_1_12": "02000000c768690900000000",
+        "debug_tag": "Debug1",
+        "bytes_19_29": "000001f9f2c81a00000000",
+        "material_name": "hcAlumin",
+        "bytes_38_39": "0201",
+        "raw": "c802000000c768690900000000446562756731000001f9f2c81a000000006863416c756d696e0201"
+      }
+    },
+    "meta_decoded": {
+      "magic": "0xc0f3819f",
+      "field_4": 8,
+      "type_flags": "0x0501",
+      "blueprint_id": "aa9430103bd7fdd8",
+      "bytes_18_27": "01000000000000000001",
+      "field_28": 75488257,
+      "field_32_35": "70ff413f",
+      "material_name_offset": 106,
+      "material_name": "hcAlumin\u0000\u0000\u0010",
+      "material_count_field": 16,
+      "material_count_note": "16 = 4 * 4 voxels (estimated)",
+      "material_flag": "0x01",
+      "material_quantities_f64": [
+        3.125,
+        20.0,
+        20.0,
+        16.625,
+        0.12207,
+        0.12207,
+        0.0
+      ],
+      "total_length": 371,
+      "raw_hex": "c0f3819f080000000501aa9430103bd7fdd80100000000000000000101dc7f0470ff413f0000000000000000000000000000000000000000000000000000000000000000015000000050000000410000000100000001000000040000000101000000f9f2c81a000000006863416c756d696e0000100000000000010000000000000940000000000000344000000000000034400000000000a03040000000000040bf3f000000000040bf3f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
