@@ -364,3 +364,9 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
 | 3219 | Position S3: 4×4×4 shift Z only +10 | x8..11 y8..11 z18..21 | (8,8,8) | lead=99 bnd_op=75. Position law additive; z solved (bnd +z, lead 0). |
 - **tests/mc_lens_0707.blueprint** (2026-07-07) — multi-chunk LENS (domed top+bottom) across X-seam from box donor. **DEPLOYED AS EXPECTED — multi-chunk CLOSED-shape generation proven (two surfaces continuous across chunk seam).**
 - **tests/ellipsoid2_0707.blueprint** (2026-07-07) — 3191 gentle 80%% z-squash, full parse. DEPLOYED: equator (central 8 Z) SMOOTH (core BT extraction validated), top/bottom ~5 Z-rows blocky (run>0 cap-vertex placement is the pinpointed remaining gap).
+| 3353 | M2 probe B12: flat 8x12x4 box (nx8 nc12) | x8..15 y8..19 z8..11 | (8,8,8) | Pinned large-nc layout: pad=246-10*nx holds at nc12, gap band 7..14 -> 6. |
+| 3355 | M2 probe B16: flat 12x16x4 box (nx12 nc16) | x8..19 y8..23 z8..11 | (8,8,8) | Gap band >=16 -> 4 confirmed; pad line holds. M2 layout generative nc4-nc16. |
+| 3357 | OPD opener-discriminator: planes [2,4,6,8],[8,8,8,8],[6,6,6,6] | x8..10 y8..11 z8+ | (8,8,8) | Y-lo opener dispatch confirmed (desc off full-width = max-K). |
+| 3359 | OPD2: planes [2,4,6,4],[8,8,8,8],[6,6,6,6] | x8..10 y8..11 z8+ | (8,8,8) | Equal-nc flat descent uses OWN-PAIR form. du_general 14/14. |
+| 3361 | OVH1 overhang probe: 3x3 h2 base + floating bar (gap2,h2) | base x8..10 y8..10 z8..9, bar x8..10 y9 z12..13 | (8,8,8) | Two-interval column = extra marker (val igap-1) + extra group tokens (val igap-2, run h_up) in max-window walls; column t := full span. |
+| 3363 | OVH2 overhang probe: same base, bar gap3 h3 | base x8..10 y8..10 z8..9, bar x8..10 y9 z13..15 | (8,8,8) | Pinned slopes of overhang val laws. CAVEAT: gap AND h_up co-varied -> igap-vs-h_up still confounded (needs OVH3 gap2/h3). du_general intervals: 16/16 byte-exact. |
