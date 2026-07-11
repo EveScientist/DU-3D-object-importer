@@ -119,7 +119,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     flat = all(iv[0][0]==z00 for iv in IV.values())
 
     # ---- plateau byte2 (over emitted marker planes) ----
-    def colset(p): return frozenset((y,IV[(planes[p][0],y)]) for y in mycols(p))
+    # FOOTPRINT plateau only (column SETS; heights/intervals irrelevant): every donor with
+    # constant footprint has b2=2 even with height plateaus (E1/stairs/ramps), and OCC3's
+    # b2=3 plateau was a footprint plateau. Interval-sensitive colset broke Deployment 11
+    # ('Deserializing invalid vertex' = b2 over-read, the OCC3 crash signature).
+    def colset(p): return frozenset(mycols(p))
     best=cur=1
     for p in range(1,m1):
         if colset(p)==colset(p-1): cur+=1; best=max(best,cur)
