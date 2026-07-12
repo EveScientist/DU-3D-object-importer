@@ -118,7 +118,8 @@ def _norm(cols):
 
 def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                        xseam_lo=False, xopen_hi=False, yseam_lo=None, yopen_hi=None,
-                       zseam_lo=False, zopen_hi=False):
+                       zseam_lo=False, zopen_hi=False,
+                       yopen_cap=True, yseam_merge=True):
     IV=_norm(cols)
     xs,planes=_planes_of(IV)
     nP=len(planes)
@@ -318,13 +319,16 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 F=(35*(len(ysm2)+len(ysm)))//2 + max(Tl,Tp) - z0g
                 op=(199-F)%256
             cstart=1
-            if sm:  # y-seam: merge opener + first transition into one wall token, val+35
-                toks.append(((op+35)%256, max(hs[0],hs[1]))); smooth.append((gx,ys[1],min(zc[0],zc[1])))
+            if sm:  # y-seam: FLAT seam -> merged opener+first-transition token (val+35,
+                    # 3187c2); CURVED seam -> nothing, std walls from c=2 (3400 high chunk)
+                if yseam_merge:
+                    toks.append(((op+35)%256, max(hs[0],hs[1]))); smooth.append((gx,ys[1],min(zc[0],zc[1])))
                 cstart=2
             else:
                 toks.append((op,hs[0])); smooth.append((gx,ys[0],zc[0]))
                 _upwall_bnd(toks,smooth,ex[0],[],gx,ys[0])     # Y-lo edge wall uppers
-            for c in range(cstart,nc):
+            cend=nc if (not ph or yopen_cap) else nc-1
+            for c in range(cstart,cend):
                 sp2=ss[c-2] if c>=2 else 0
                 zc1=zc[c-1] if zc[c-1] is not None else pm(c-1,c)
                 bs=pm(c-1,c)-pm(c-2,c-1) if c>=2 else pm(c-1,c)-zc1
@@ -475,7 +479,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     # nx4 y-band: pad -2 at y0' in {4,19,-10} i.e. (y0-8)%15 in (4,5) (3418/3187c1/3187c2;
     # y' 0/9/10 unaffected (3162/3420/3217), nx6 at y27 unaffected (3380c1)). Empirical;
     # smells like phase alignment -- revisit with more y-cells.
-    if nx==4 and (mycols(0)[0]-8)%15 in (4,5): pad-=2
+    if nx<=4 and (mycols(0)[0]-8)%15 in (4,5): pad-=2   # 3400c1 extends to nx3; nx6 exempt (3380c1)
     if lead is None:
         lead=lead_law(planes[0][0], mycols(0)[0])
     markerspan=sum(len(m) for m in mplanes)+sum(mkgaps)
@@ -550,6 +554,25 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
                          if b>=zf and a<=zt_)
                 if cl: sub[(x-lox,y-loy)]=cl
             if not sub: continue
+            # Y PHANTOM COL := COPY of the S col (3400: donor T=(4,0) = copy-h; true
+            # col only used for the flatness flags). X phantom plane likewise (copy ==
+            # true on every existing donor; 3189's seam-adjacent planes are identical).
+            ycap=True; ymerge=True
+            if ys_hi:
+                Sy=hiy+1-loy
+                for (x,y) in [k for k in sub if k[1]==Sy+1]: del sub[(x,y)]
+                for (x,y) in [k for k in sub if k[1]==Sy]:
+                    sub[(x,Sy+1)]=sub[(x,Sy)]
+                ycap=all(IV.get((x+lox,hiy+2))==IV.get((x+lox,hiy+1))
+                         for x in {k[0] for k in sub} if (x+lox,hiy+1) in IV)
+            if ys_lo:
+                ymerge=all(IV.get((x,loy-2))==IV.get((x,loy-1))
+                           for x in {k[0]+lox for k in sub} if (x,loy-1) in IV)
+            if xs_hi:
+                Sx=hix+1-lox
+                for k in [k for k in sub if k[0]==Sx+1]: del sub[k]
+                for (x,y) in [k for k in sub if k[0]==Sx]:
+                    sub[(Sx+1,y)]=sub[(Sx,y)]
             key=(cx0+ci,cy0+cj,cz0+ck)
             if mc is None:
                 # carry view for the mc law = sub WITHOUT phantoms (marker range)
@@ -570,5 +593,6 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
                 xseam_lo=xs_lo, xopen_hi=xs_hi,
                 yseam_lo=(yf-loy) if ys_lo else None,
                 yopen_hi=(hiy+1-loy) if ys_hi else None,
-                zseam_lo=zs_lo, zopen_hi=zs_hi)
+                zseam_lo=zs_lo, zopen_hi=zs_hi,
+                yopen_cap=ycap, yseam_merge=ymerge)
     return out
