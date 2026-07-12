@@ -68,21 +68,23 @@ def _tok(v,r): return bytes([v&0xff,1,r&0xff,0x7e,0x7e,0x7e,r&0xff,0])
 def _enc(d): return (int(round(d))+126)&0xff
 
 def bnd_op_law(x,y,z): return (65 - 55*(x-8) + 35*(y-8) + (z-8)) % 256
+_LEAD_XBASE=[0,10,19,28,38,48,57,67,76]   # cells 2,5,6,7 interpolated (~9.56/vox), rest donor-pinned
 def lead_law(x,y):
-    yt=2*((y-8)//9)
-    # xseam chunks (x<8, local negatives): nonzero y-terms shift +2 (3380 chunks 9/1;
-    # x>=8 donors unaffected). Full law needs an x-sweep (known bad point: (20,13)->215).
-    if x<8 and yt!=0: yt+=2
-    return 99 + (48*(x-8))//5 + yt
-def mc_law(carry_cols, xopen_owner=False, yopen_owner=False):
+    xp=x-8
+    xt=86*(xp//9)+_LEAD_XBASE[xp%9]
+    yp=y-8
+    yt=2*((yp+4)//9) if yp>=0 else 2*(yp//9)   # +4 shift for positives (3189c1/3420)
+    if x<8 and yt!=0: yt+=2                    # xseam chunks (3380 corner/9-chunk)
+    return 99 + xt + yt
+def mc_law(carry_cols, xopen_owner=None, yopen_owner=None):
     """mc for a chunk from its CARRY view (markers view, local coords, NO phantoms;
-    z carried to S / from S-2). Solved 2026-07-12 (mcfit.py: 27/29 single + 19/19 seam
-    chunks exact): mc = 512 + m8,
+    z carried to S / from S-2). mc = 512 + m8,
       m8 = (112 + 55*(nx-4) - 35*(mean(min_nc,max_nc)-4) - (T_last-12)
-            + 19*(x0-8)//5 - 47*(y0-8)//5 - 51*xopen_owner + 25*yopen_owner) mod 256
-    T_last = top gridline of the last column (absorbs z-position). Bonus flags:
-    xopen_owner = chunk continues in +X AND owns the shape's x-start (xopen and not
-    xseam); yopen_owner likewise. Same 55/35 family as bnd_op_law."""
+            + 55*(x0-8) - 35*(y0-8)) mod 256
+    T_last = top gridline of the last column (absorbs z-position). Integer slopes pinned
+    by the P5-P11 sweep (3408-3420); the earlier 19//5 / -47//5 fractional slopes and
+    ownership bonuses were aliasing from multiple-of-5 sampling. Same 55/35 family as
+    bnd_op_law. (owner args kept for signature compat; unused.)"""
     IV=_norm(carry_cols)
     xs=sorted({x for x,_ in IV}); nx=len(xs)
     ncs=[len([1 for (x,y) in IV if x==xx]) for xx in xs]
@@ -90,8 +92,7 @@ def mc_law(carry_cols, xopen_owner=False, yopen_owner=False):
     lastx=xs[-1]; ylast=max(y for (x,y) in IV if x==lastx)
     Tl=IV[(lastx,ylast)][-1][1]+1
     x0=xs[0]; y0=min(y for _,y in IV)
-    m8=int(112 + 55*(nx-4) - 35*(ncm-4) - (Tl-12) + (19*(x0-8))//5 - (47*(y0-8))//5
-           - 51*bool(xopen_owner) + 25*bool(yopen_owner))%256
+    m8=int(112 + 55*(nx-4) - 35*(ncm-4) - (Tl-12) + 55*(x0-8) - 35*(y0-8))%256
     return 512+m8
 
 def _mkband(s): return 8 if s<=12 else (6 if s<=28 else (4 if s<=42 else 2))
@@ -392,8 +393,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             hp2=t.get(a-1,0); bs=bsf(a,b,a-1,a)
             bval=(33-max(t[a],hp2)+bs)%256
             if ea or eb or not pres(a) or not pres(b):
-                # edge wall incl group-absent columns (z-clipped away: ZC2c2 (33,3))
-                toks.append((bval,max(t[a],t[b]))); smooth.append((gx,yw,min(x for x in (zc[a],zc[b]) if x is not None)))
+                # edge wall incl group-absent columns (z-clipped away: ZC2c2 (33,3));
+                # RUN = max BOTTOM-interval height (P3 3404: val keeps full span 33-8,
+                # run stays 3), not the span
+                rr=max(h(xL,a),h(xR,a),h(xL,b),h(xR,b))
+                toks.append((bval,rr)); smooth.append((gx,yw,min(x for x in (zc[a],zc[b]) if x is not None)))
             else:
                 # B/T are SURFACE tokens (ZC1/ZC2): B exists unless both cols lack a real
                 # bottom (cut_bot); T exists unless both lack a real top (cut_top).
@@ -464,8 +468,14 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     if maxnc==5: pad=240-8*nx if nx<=3 else 246-10*nx
     elif 7<=maxnc<=8: pad=241-9*nx
     else: pad=246-10*nx        # nc4,6,12,16 (B12/B16) all on this line
-    if nx==4 and maxnc in (5,6): pad-=2   # provisional kink (3187 both chunks)
     if nx>=20: pad+=6                     # provisional kink (3191 nx20: pad 52; 3189 nx13/14 classic; nx15-19 unseen)
+    # measured pad cells (P12/P13 3422/3424); lines beyond these unseen
+    if (nx,maxnc)==(4,9): pad-=2
+    if (nx,maxnc)==(3,15): pad-=4
+    # nx4 y-band: pad -2 at y0' in {4,19,-10} i.e. (y0-8)%15 in (4,5) (3418/3187c1/3187c2;
+    # y' 0/9/10 unaffected (3162/3420/3217), nx6 at y27 unaffected (3380c1)). Empirical;
+    # smells like phase alignment -- revisit with more y-cells.
+    if nx==4 and (mycols(0)[0]-8)%15 in (4,5): pad-=2
     if lead is None:
         lead=lead_law(planes[0][0], mycols(0)[0])
     markerspan=sum(len(m) for m in mplanes)+sum(mkgaps)

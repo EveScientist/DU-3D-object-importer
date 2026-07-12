@@ -68,6 +68,10 @@ mctests=[
   {(8,8,8):603,(8,8,9):633}),
  ('3378 Z-seam steps', {(x,y):(27,[30,33,35,30][y-8]) for x in range(8,11) for y in range(8,12)},
   {(8,8,8):550,(8,8,9):582}),
+ ('3404 cut+overhang', {**{(x,y):(28,30) for x in range(8,11) for y in (8,10)},
+  **{(x,9):[(28,33),(36,38)] for x in range(8,11)}}, None),
+ ('3406 OVH5 slab', {**{(x,y):(8,9) for x in range(8,11) for y in range(8,11)},
+  **{(x,y):[(8,9),(12,14)] for x in range(8,11) for y in (8,9)}}, None),
  ('3380 XY-corner box', {(x,y):(8,11) for x in range(27,35) for y in range(27,35)},
   None),
  ('3382 X3 triple span', {(x,y):(8,11) for x in range(27,67) for y in range(8,12)},
@@ -84,6 +88,10 @@ for name,cols in tests:
     else:
         dif=[i for i in range(min(len(S),len(D))) if S[i]!=D[i]]
         print(f'{name}: {len(dif)} diffs len {len(S)}/{len(D)} @{dif[:5]}' + ''.join(f' [{i}]{S[i]:02x}!={D[i]:02x}' for i in dif[:5]))
+for x0,y0,nx,nc,bp in [(9,8,4,4,'3408'),(11,8,4,4,'3410'),(12,8,4,4,'3412'),(20,8,4,4,'3414'),
+        (21,8,4,4,'3416'),(8,12,4,4,'3418'),(8,17,4,4,'3420'),(8,8,4,9,'3422'),(8,8,3,15,'3424'),(8,8,4,5,'3426')]:
+    mctests.append((f'{bp} sweep x{x0}y{y0} {nx}x{nc}',
+                    {(x0+i,y0+j):(8,11) for i in range(nx) for j in range(nc)}, None))
 for name,cols,mcs in mctests:
     n=name.split()[0]
     don=mchunks(n)
