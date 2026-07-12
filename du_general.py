@@ -74,6 +74,26 @@ def lead_law(x,y):
     # x>=8 donors unaffected). Full law needs an x-sweep (known bad point: (20,13)->215).
     if x<8 and yt!=0: yt+=2
     return 99 + (48*(x-8))//5 + yt
+def mc_law(carry_cols, xopen_owner=False, yopen_owner=False):
+    """mc for a chunk from its CARRY view (markers view, local coords, NO phantoms;
+    z carried to S / from S-2). Solved 2026-07-12 (mcfit.py: 27/29 single + 19/19 seam
+    chunks exact): mc = 512 + m8,
+      m8 = (112 + 55*(nx-4) - 35*(mean(min_nc,max_nc)-4) - (T_last-12)
+            + 19*(x0-8)//5 - 47*(y0-8)//5 - 51*xopen_owner + 25*yopen_owner) mod 256
+    T_last = top gridline of the last column (absorbs z-position). Bonus flags:
+    xopen_owner = chunk continues in +X AND owns the shape's x-start (xopen and not
+    xseam); yopen_owner likewise. Same 55/35 family as bnd_op_law."""
+    IV=_norm(carry_cols)
+    xs=sorted({x for x,_ in IV}); nx=len(xs)
+    ncs=[len([1 for (x,y) in IV if x==xx]) for xx in xs]
+    ncm=(min(ncs)+max(ncs))/2
+    lastx=xs[-1]; ylast=max(y for (x,y) in IV if x==lastx)
+    Tl=IV[(lastx,ylast)][-1][1]+1
+    x0=xs[0]; y0=min(y for _,y in IV)
+    m8=int(112 + 55*(nx-4) - 35*(ncm-4) - (Tl-12) + (19*(x0-8))//5 - (47*(y0-8))//5
+           - 51*bool(xopen_owner) + 25*bool(yopen_owner))%256
+    return 512+m8
+
 def _mkband(s): return 8 if s<=12 else (6 if s<=28 else (4 if s<=42 else 2))
 def _gband(s):  return 8 if s<=10 else (6 if s<=24 else (4 if s<=40 else 2))  # group bands sit LOWER than marker bands (3189/3191 groups: 26->4, 42->2, 40->4)
 
@@ -479,7 +499,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     if prev<scanlen: fill(prev,scanlen,last is not None and last%2==0)
     return bytes(S)
 
-def build_multichunk(cols, mc=606, chunk0=(8,8,8), smooth_fn=None):
+def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
     """Split GLOBAL cols (construct-local voxel coords, chunk0 covers 0..31 per axis) at
     32-voxel chunk boundaries in X, Y and Z -> {(cx,cy,cz): scan}. mc: int, or dict keyed
     by chunk.
@@ -521,7 +541,14 @@ def build_multichunk(cols, mc=606, chunk0=(8,8,8), smooth_fn=None):
                 if cl: sub[(x-lox,y-loy)]=cl
             if not sub: continue
             key=(cx0+ci,cy0+cj,cz0+ck)
-            m = mc[key] if isinstance(mc,dict) else mc
+            if mc is None:
+                # carry view for the mc law = sub WITHOUT phantoms (marker range)
+                mcv={c:iv for c,iv in sub.items()
+                     if (not xs_hi or c[0]<=hix+1-lox) and (not ys_hi or c[1]<=hiy+1-loy)}
+                m = mc_law(mcv, xopen_owner=(xs_hi and not xs_lo),
+                                yopen_owner=(ys_hi and not ys_lo))
+            else:
+                m = mc[key] if isinstance(mc,dict) else mc
             # smooth_fn is defined over GLOBAL coords; chunks work in local coords, so
             # wrap with the chunk offset (field stays continuous across seams)
             sf=None
