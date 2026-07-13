@@ -222,6 +222,9 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     def zfirst(p):
         ysm=mycols(p); z=zl(planes[p][0],ysm[0]); return -1 if z is None else z
     def ncp(p): return len(mycols(p))
+    def _flat_top(p):
+        hs=[h(planes[p][0],y) for y in mycols(p)]
+        return all(v==hs[0] for v in hs)
     def _ylo_F(g):
         # Y-lo opener F-forms (each byte-exact in its donor class):
         #  flat, ncR>=ncL:      own-pair form  F=35*mean(ncL,ncR)+Tlast(L)-zfirst(R)
@@ -248,13 +251,13 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     mT=max((zt(planes[q][0],y) for q in (L,R) for y in mycols(q)
                             if ivs(planes[q][0],y) is not None), default=-1)
                     F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
-            elif vol(L)>vol(R) and L>0 and ncp(L-1)>ncp(L):
-                # DESCENDING equal-nc col-set run coming OFF A WIDER PEAK (ncp(L-1)>ncp(L)):
-                # shifted-pair = marker-F(L), using L's previous (wider) plane. DOMER3 G5
-                # (x16 nc7 -> x17 -> x18 descending run): F=_F(x17)=212 -> opener f3.
-                # OPD2 descends but L-1 is same-nc -> own-pair (below), so gated on the peak.
+            elif vol(L)>vol(R) and L>0 and not _flat_top(R):
+                # DESCENDING equal-nc: shifted-pair F=_F(L) when the TARGET plane R is
+                # curved (DOMER3 G5, NCV5 G3 continuing -- both 1-byte-confirmed). When R
+                # is a FLAT-TOP plateau (all cols equal h: OPD2 [6,6,6,6], 3238 [4,4,4,4])
+                # -> own-pair. Discriminator is R (shorter plane), not L.
                 F=_F(L)
-            else:                   # ascending/equal, or descending w/o wider peak: own-pair
+            else:                   # ascending/equal, or descending flat-top: own-pair
                 F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
         else:
             if vol(R)!=vol(L):
