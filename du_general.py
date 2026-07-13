@@ -342,10 +342,10 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 _upwall_bnd(toks,smooth,ex[c-1],ex[c],gx,ys[c])
             if ph:
                 hprev=hs[seam_idx-1]; hseam=hs[seam_idx]
-                hphan=hs[seam_idx+1] if seam_idx+1<nc else None
                 # TAIL = (33 - max(hseam,hprev), hseam); +X always, -X iff ascending or
-                # flat-continues (hseam==hprev==hphan). See kickoff tail 2026-07-12.
-                if g==nP or hseam>hprev or (hseam==hprev and hphan==hseam):
+                # flat-continues. "flat-continues" = the REAL next col (y=S+1) equals the
+                # seam (yopen_cap; the carried phantom is a COPY so hs can't tell us).
+                if g==nP or hseam>hprev or (hseam==hprev and yopen_cap):
                     toks.append(((33-max(hseam,hprev))%256, hseam))
                     smooth.append((gx,yopen_hi+1,zc.get(seam_idx)))
             else:
