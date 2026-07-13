@@ -493,12 +493,15 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     ggaps=[_gband(gncs[i]+gncs[i+1]) for i in range(len(glines)-1)]
     # pads
     if maxnc==5: pad=240-8*nx if nx<=3 else 246-10*nx
-    elif 7<=maxnc<=8: pad=241-9*nx
+    elif 7<=maxnc<=11:
+        # slope-9 band (nc7-11); base drops 2 every 2 nc: nc7/8=241, nc9/10=239, nc11=237.
+        # DOMER4 (nx9,nc9): 239-81=158 confirmed. nc10/11 bases EXTRAPOLATED (need donors).
+        pad=({7:241,8:241,9:239,10:239,11:237}[maxnc])-9*nx
     else: pad=246-10*nx        # nc4,6,12,16 (B12/B16) all on this line
     if nx>=20: pad+=6                     # provisional kink (3191 nx20: pad 52; 3189 nx13/14 classic; nx15-19 unseen)
-    # measured pad cells (P12/P13 3422/3424); lines beyond these unseen
-    if (nx,maxnc)==(4,9): pad-=2
-    if (nx,maxnc)==(3,15): pad-=4
+    if (nx,maxnc)==(3,15): pad-=4         # measured cell (P13 3424); lines beyond unseen
+    if (nx,maxnc)==(4,9): pad+=1          # flat box 3422 sits +1 above the 239-9nx line
+                                          # (curved DOMER4 nx9 is exact); unreconciled, 1 cell
     # nx4 y-band: pad -2 at y0' in {4,19,-10} i.e. (y0-8)%15 in (4,5) (3418/3187c1/3187c2;
     # y' 0/9/10 unaffected (3162/3420/3217), nx6 at y27 unaffected (3380c1)). Empirical;
     # smells like phase alignment -- revisit with more y-cells.
