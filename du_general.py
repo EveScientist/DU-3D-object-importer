@@ -248,7 +248,13 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     mT=max((zt(planes[q][0],y) for q in (L,R) for y in mycols(q)
                             if ivs(planes[q][0],y) is not None), default=-1)
                     F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
-            else:                   # ascending/descending equal-nc: own-pair form
+            elif vol(L)>vol(R) and L>0 and ncp(L-1)>ncp(L):
+                # DESCENDING equal-nc col-set run coming OFF A WIDER PEAK (ncp(L-1)>ncp(L)):
+                # shifted-pair = marker-F(L), using L's previous (wider) plane. DOMER3 G5
+                # (x16 nc7 -> x17 -> x18 descending run): F=_F(x17)=212 -> opener f3.
+                # OPD2 descends but L-1 is same-nc -> own-pair (below), so gated on the peak.
+                F=_F(L)
+            else:                   # ascending/equal, or descending w/o wider peak: own-pair
                 F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
         else:
             if vol(R)!=vol(L):

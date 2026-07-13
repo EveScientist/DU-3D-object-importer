@@ -105,4 +105,27 @@ for name,cols,mcs in mctests:
         else:
             dif=[i for i in range(min(len(S or b''),len(D))) if S[i]!=D[i]]
             print(f'{name} chunk{k}: {len(dif)} diffs len {len(S or b"")}/{len(D)} @{dif[:5]}')
+
+# --- ARC #13 pipeline donors (voxel occupancy -> build_multichunk, mc from law) ---
+def _mk(H):
+    v=set()
+    for x,row in H.items():
+        for y,h in row.items():
+            for z in range(8,8+h): v.add((x,y,z))
+    return v
+import obj_pipeline as _P
+pipe_tests=[
+ ('3466 NCV1', _mk({8:{9:2,10:3,11:2},9:{8:2,9:3,10:4,11:3,12:2},10:{9:2,10:3,11:2}})),
+ ('3468 NCV2', _mk({8:{10:2},9:{8:2,9:3,10:4,11:3,12:2},10:{10:2}})),
+ ('3470 NCV3', _mk({8:{10:2,11:3,12:4,13:3,14:2},9:{9:2,10:3,11:4,12:5,13:4,14:3,15:2},10:{10:2,11:3,12:4,13:3,14:2}})),
+ ('3473 NCV4', _mk({8:{11:2,12:3,13:2},9:{10:2,11:3,12:4,13:3,14:2},10:{10:3,11:4,12:5,13:4,14:3},11:{11:2,12:3,13:2}})),
+ ('3475 DOMER3', _mk({13:{16:2},14:{14:2,15:3,16:3,17:3,18:2},15:{14:3,15:4,16:4,17:4,18:3},16:{13:2,14:3,15:4,16:4,17:4,18:3,19:2},17:{14:3,15:4,16:4,17:4,18:3},18:{14:2,15:3,16:3,17:3,18:2},19:{16:2}})),
+]
+for name,vox in pipe_tests:
+    n=name.split()[0]
+    D,mc,bop=body(n)
+    S=_P.build_scans(vox)[(8,8,8)]
+    ok=S==D; allok&=ok
+    print(f'{name}: BYTE-EXACT' if ok else f'{name}: {sum(1 for i in range(min(len(S),len(D))) if S[i]!=D[i])} diffs')
+
 print('=== REGRESSION:', 'ALL BYTE-EXACT' if allok else 'FAILURES ABOVE', '===')
