@@ -57,9 +57,15 @@ def solid_fill_parity(surface_voxels):
     return out
 
 
-def to_columns(voxels):
+def to_columns(voxels, min_thickness=2):
     """Voxel set {(x,y,z)} -> {(x,y): [(zlo,zhi), ...]} sorted z-intervals per column
-    (the build_multichunk / build_scan_general input format; multiple intervals = overhangs)."""
+    (the build_multichunk / build_scan_general input format; multiple intervals = overhangs).
+
+    min_thickness: every interval is grown UPWARD to at least this many voxels. HEIGHT-1
+    columns break the encoding (Top token = min(h)-2 = -1 = 0xff invalid vertex; DU's
+    h=1 single-token form is undecoded -- probe pending). A voxelized BASE with a floor of
+    2 is legitimate: the smoothing layer deflects face-points to the true surface anyway.
+    Merges any intervals that overlap after growth."""
     by_col = {}
     for x, y, z in voxels:
         by_col.setdefault((x, y), []).append(z)
@@ -72,9 +78,19 @@ def to_columns(voxels):
             if z == p + 1:
                 p = z
             else:
-                intervals.append((s, p)); s = z; p = z
-        intervals.append((s, p))
-        cols[(x, y)] = intervals
+                intervals.append([s, p]); s = z; p = z
+        intervals.append([s, p])
+        for iv in intervals:
+            if iv[1] - iv[0] + 1 < min_thickness:
+                iv[1] = iv[0] + min_thickness - 1
+        # re-merge overlaps created by growth
+        merged = [intervals[0]]
+        for a, b in intervals[1:]:
+            if a <= merged[-1][1] + 1:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        cols[(x, y)] = [tuple(iv) for iv in merged]
     return cols
 
 
