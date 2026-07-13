@@ -327,7 +327,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             else:
                 toks.append((op,hs[0])); smooth.append((gx,ys[0],zc[0]))
                 _upwall_bnd(toks,smooth,ex[0],[],gx,ys[0])     # Y-lo edge wall uppers
-            cend=nc if (not ph or yopen_cap) else nc-1
+            # yopen boundary: walls run through the seam col (y=yopen_hi); the +Y-open
+            # edge is a TAIL token (curved-Y-seam decode 2026-07-12, 9 donors). Non-yopen
+            # keeps the original walls+Y-hi-closing.
+            seam_idx = ys.index(yopen_hi) if ph else None
+            cend = (seam_idx+1) if ph else nc
             for c in range(cstart,cend):
                 sp2=ss[c-2] if c>=2 else 0
                 zc1=zc[c-1] if zc[c-1] is not None else pm(c-1,c)
@@ -336,7 +340,15 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 zmin=[v for v in (zc[c-1],zc[c]) if v is not None]
                 toks.append(((33-max(ss[c-1],sp2)+bs)%256, r)); smooth.append((gx,ys[c],min(zmin) if zmin else None))
                 _upwall_bnd(toks,smooth,ex[c-1],ex[c],gx,ys[c])
-            if not ph:
+            if ph:
+                hprev=hs[seam_idx-1]; hseam=hs[seam_idx]
+                hphan=hs[seam_idx+1] if seam_idx+1<nc else None
+                # TAIL = (33 - max(hseam,hprev), hseam); +X always, -X iff ascending or
+                # flat-continues (hseam==hprev==hphan). See kickoff tail 2026-07-12.
+                if g==nP or hseam>hprev or (hseam==hprev and hphan==hseam):
+                    toks.append(((33-max(hseam,hprev))%256, hseam))
+                    smooth.append((gx,yopen_hi+1,zc.get(seam_idx)))
+            else:
                 ss2=ss[-2] if nc>=2 else 0
                 z2=zc[nc-2] if nc>=2 else zc[nc-1]
                 zn=zc[nc-1]
