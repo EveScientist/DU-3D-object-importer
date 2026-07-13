@@ -88,7 +88,9 @@ def mc_law(carry_cols, xopen_owner=None, yopen_owner=None):
     IV=_norm(carry_cols)
     xs=sorted({x for x,_ in IV}); nx=len(xs)
     ncs=[len([1 for (x,y) in IV if x==xx]) for xx in xs]
-    ncm=(min(ncs)+max(ncs))/2
+    ncm=(ncs[-1]+max(ncs))/2   # (last-plane nc + max nc)/2; NOT (min+max)/2 -- constant-nc
+                               # donors have nc_last==max so it reduced to nc; NCV6 (3481,
+                               # widest at last plane) pinned it (needs max not min).
     lastx=xs[-1]; ylast=max(y for (x,y) in IV if x==lastx)
     Tl=IV[(lastx,ylast)][-1][1]+1
     x0=xs[0]; y0=min(y for _,y in IV)
@@ -251,8 +253,8 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     mT=max((zt(planes[q][0],y) for q in (L,R) for y in mycols(q)
                             if ivs(planes[q][0],y) is not None), default=-1)
                     F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
-            elif vol(L)>vol(R) and L>0 and not _flat_top(R):
-                # DESCENDING equal-nc: shifted-pair F=_F(L) when the TARGET plane R is
+            elif ncp(L)==ncp(R) and vol(L)>vol(R) and L>0 and not _flat_top(R):
+                # DESCENDING EQUAL-nc: shifted-pair F=_F(L) when the TARGET plane R is
                 # curved (DOMER3 G5, NCV5 G3 continuing -- both 1-byte-confirmed). When R
                 # is a FLAT-TOP plateau (all cols equal h: OPD2 [6,6,6,6], 3238 [4,4,4,4])
                 # -> own-pair. Discriminator is R (shorter plane), not L.
