@@ -455,14 +455,26 @@ H3_HDR = (b"\x13\xa0\xb8'\x06\x00\x00\x00\x9e3\x81\xe8\t\x00\x00\x00\xff\x00\x00
           b"\x00\x01\x00\x00 \x00\x00\x00 \x00\x00\x00 \x00\x00\x00")
 H3_TAIL_AFTER_MC = b'\x00\xc7hi\t\x00\x00\x00\x00Debug1\x00\x00\x01\xa5\x02\xb0\xcb\x00\x00\x00\x00hcCarbon\x02\x01'
 
+def _scan_b2(scan):
+    """Plateau byte-2 of the scan's first marker, found position-independently: skip the
+    leading 00/ff background alternation, read marker byte-2. (Matches du_assemble._scan_b2;
+    the old fixed-offset-101 read assumed lead=99 and broke off-origin shapes.)"""
+    i = 0
+    while i < len(scan) and scan[i] == (0 if i % 2 == 0 else 0xff):
+        i += 1
+    if i + 4 < len(scan) and scan[i + 1] == 1:
+        return scan[i + 2]
+    return 2
+
+
 def build_h3_body(scan, mc):
     """Full h3 voxel body from scratch: constant header + our scan + mc + constant tail.
     The tail's penultimate byte is a shape-global 'plateau' parameter that mirrors the
-    marker byte-2 (=2 normally; the interior-plateau length for shapes like OCC3). Read
-    it from the scan's first marker (offset lead+2 = 101 at standard position) and patch
-    the tail so the two stay consistent (else the mesher over-reads: OCC3 3325)."""
+    marker byte-2 (=2 normally; the interior-plateau length for shapes like OCC3). It MUST
+    match the scan's first marker byte-2 or the mesher over-reads (OCC3 3325 / Deployment
+    11a-c). Detected position-independently (lead varies with shape position)."""
     import struct
-    b2 = scan[101] if len(scan) > 101 and scan[100] == 1 else 2
+    b2 = _scan_b2(scan)
     tail = H3_TAIL_AFTER_MC[:-2] + bytes([b2, H3_TAIL_AFTER_MC[-1]])
     return H3_HDR + bytes(scan) + struct.pack('<I', mc & 0xffffffff) + tail
 
