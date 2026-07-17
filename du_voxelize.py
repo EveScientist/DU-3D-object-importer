@@ -164,16 +164,23 @@ def _scan_axis(verts, faces, grid, axis):
     v0 = V[faces[:, 0]]; v1 = V[faces[:, 1]]; v2 = V[faces[:, 2]]
     amin = np.minimum(np.minimum(v0, v1), v2)
     amax = np.maximum(np.maximum(v0, v1), v2)
+    # Perturb the ray sample point by tiny INCOMMENSURATE irrationals so rays never pass
+    # exactly through a shared edge / vertex / coplanar ring (the equatorial "knife cut":
+    # a UV sphere's parallel of latitude is a full ring of coplanar edges that the two
+    # perpendicular-axis rays graze simultaneously -> majority vote can't save it). An
+    # off-grid nudge makes such grazes measure-zero. Sub-voxel so classification is unmoved.
+    EA = 1e-3 * math.sqrt(2)
+    EB = 1e-3 * math.sqrt(3)
     inside = set()
     for a in range(grid):
-        pa = a + 0.5
+        pa = a + 0.5 + EA
         ma = (amin[:, 0] <= pa) & (pa <= amax[:, 0])
         if not ma.any():
             continue
         b0, b1, b2 = v0[ma], v1[ma], v2[ma]
         bmn = amin[ma]; bmx = amax[ma]
         for b in range(grid):
-            pb = b + 0.5
+            pb = b + 0.5 + EB
             mb = (bmn[:, 1] <= pb) & (pb <= bmx[:, 1])
             if not mb.any():
                 continue
