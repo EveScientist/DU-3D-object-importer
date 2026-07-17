@@ -136,7 +136,15 @@ def _norm(cols):
 def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                        xseam_lo=False, xopen_hi=False, yseam_lo=None, yopen_hi=None,
                        zseam_lo=False, zopen_hi=False,
-                       yopen_cap=True, yseam_merge=True):
+                       yopen_cap=True, yseam_merge=True,
+                       yseam_payload=True, yopen_next=None):
+    # yseam_merge is DEAD (item-14 2026-07-17: the boundary opener is ALWAYS merged; the
+    # old conditional came from misparsing expanded openers) -- kept for call compat.
+    # yseam_payload: emit the canonical fresh-build smoothing payloads on curved-Y seam
+    # tokens (opener/interior-T). The payload is DU BUILD STATE, not a shape function
+    # (3400 vs 3446: same shape, different bytes) -- some donors exported plain (3438/3450).
+    # yopen_next: {local_x: real h(S+1)} for the col past the y-open seam (phantom is a
+    # copy, so the scan itself can't tell ascending from plateau).
     IV=_norm(cols)
     xs,planes=_planes_of(IV)
     nP=len(planes)
@@ -420,10 +428,22 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     F=35*((_sp+_so)//2) + max(Tl,Tp) - z0g   # 35*INT-mean; span incl holes (3538)
                 op=(199-F)%256
             cstart=1
-            if sm:  # y-seam: FLAT seam -> merged opener+first-transition token (val+35,
-                    # 3187c2); CURVED seam -> nothing, std walls from c=2 (3400 high chunk)
-                if yseam_merge:
-                    toks.append(((op+35)%256, max(hs[0],hs[1]))); smooth.append((gx,ys[1],min(zc[0],zc[1])))
+            if sm:  # y-seam boundary: the merged opener (val op+35, run max(h[S-2],h[S-1]))
+                    # is ALWAYS present (item-14 decode 2026-07-17: the old "curved nx>=3 ->
+                    # no token" law was an artifact of misparsing the EXPANDED opener -- the
+                    # RLE quad grammar (dx,dy,dz,count) revealed it in all 18 curved donors).
+                    # When the seam neighborhood is curved, the opener carries a smoothing
+                    # payload: dz=+14 (1/6 vox) at level min(h[S-1],h[S])-1, zeros elsewhere.
+                    # (Payload is BUILD-STATE in DU -- same shape exports differ, 3400 vs
+                    # 3446 -- so emission is canonical-fresh form, yseam_payload toggles.)
+                v_op=(op+35)%256; r_op=max(hs[0],hs[1])
+                if yseam_payload and not (hs[0]==hs[1]==hs[2]) and 0<=min(hs[1],hs[2])-1<=r_op:
+                    lv=min(hs[1],hs[2])-1
+                    toks.append((v_op, r_op, [(0,0,14) if k==lv else (0,0,0)
+                                              for k in range(r_op+1)]))
+                else:
+                    toks.append((v_op, r_op))
+                smooth.append((gx,ys[1],min(zc[0],zc[1])))
                 cstart=2
             else:
                 toks.append((op,hs[0])); smooth.append((gx,ys[0],zc[0]))
@@ -443,12 +463,23 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 _upwall_bnd(toks,smooth,ex[c-1],ex[c],gx,ys[c])
             if ph:
                 hprev=hs[seam_idx-1]; hseam=hs[seam_idx]
-                # TAIL = (33 - max(hseam,hprev), hseam); +X always, -X iff ascending or
-                # flat-continues. "flat-continues" = the REAL next col (y=S+1) equals the
-                # seam (yopen_cap; the carried phantom is a COPY so hs can't tell us).
-                if g==nP or hseam>hprev or (hseam==hprev and yopen_cap):
-                    toks.append(((33-max(hseam,hprev))%256, hseam))
-                    smooth.append((gx,yopen_hi+1,zc.get(seam_idx)))
+                # TAIL = (33 - max(hseam,hprev), hseam), ALWAYS present on both boundaries
+                # (item-14 decode 2026-07-17: the old descending-suppression was a misparse
+                # of the EXPANDED tail token). Non-ascending seams carry the open-edge
+                # smoothing payload dz=+14 at level hseam-1 (canonical fresh-build form;
+                # stale-build donors vary -- payload is game state, not shape law).
+                # "ascending" needs the REAL next col h(S+1): the carried phantom is a COPY,
+                # so build_multichunk passes it via yopen_next (per local x).
+                hn = yopen_next.get(x) if yopen_next else None
+                tv=(33-max(hseam,hprev))%256
+                asc = hn is not None and hn>hseam
+                flat = hn is not None and hn==hseam==hprev
+                if asc or flat or hn is None:
+                    toks.append((tv, hseam))
+                else:
+                    toks.append((tv, hseam, [(0,0,14) if k==hseam-1 else (0,0,0)
+                                             for k in range(hseam+1)]))
+                smooth.append((gx,yopen_hi+1,zc.get(seam_idx)))
             else:
                 ss2=ss[-2] if nc>=2 else 0
                 z2=zc[nc-2] if nc>=2 else zc[nc-1]
@@ -491,7 +522,17 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             hc  =[v for v in (h(xL,a),h(xL,b),h(xR,a),h(xR,b)) if v>0]
             bsm=(_seam_marker_op()-1)%256 if (g==g0 and xseam_lo) else (234-_ylo_F(g))%256
             toks=[(bsm, max(zloc)-min(zloc))]; smooth=[(gx,b,min(zloc))]
-            toks.append(((min(hc)-2)%256, max(ztc)-min(ztc))); smooth.append((gx,b,min(ztc)))
+            tv=(min(hc)-2)%256; tr=max(ztc)-min(ztc)
+            # curved seam entry: the T token carries the seam smoothing payload dz=+42
+            # (half vox) at level 0, zeros above (universal across all expanded curved-Y
+            # donors, item-14 2026-07-17). Flat seams stay plain (3187). Build-state
+            # nondeterminism: yseam_payload toggles (3438/3450 exported plain).
+            hh=lambda y: max(h(xL,y) or 0, h(xR,y) or 0)
+            if yseam_payload and not (hh(u0)==hh(u0+1)==hh(u0+2)):
+                toks.append((tv, tr, [(0,0,42)]+[(0,0,0)]*tr))
+            else:
+                toks.append((tv, tr))
+            smooth.append((gx,b,min(ztc)))
             wstart=u0+2
         elif g==g0 and xseam_lo:  # x-seam entry line (S-1): interior form, opener = seam - 36
             # opener run: BOTTOM-interval height of col u0 (OVH4: 2 not span 6)
@@ -603,10 +644,29 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
 
     glines=list(range(g0,g1+1))
     gdata=[group_plane(g) for g in glines]
+    def _tok_rle(v,r,levels):
+        # expanded token, RLE quad grammar (item-14 2026-07-17): [val,01,run] +
+        # quads (dx+126,dy+126,dz+126,count) covering sum(count+1)==run+1 levels + [00].
+        # DU's encoder run-length-merges consecutive equal displacements; a plain
+        # expanded token is the all-counts-0 special case.
+        out=bytearray([v&0xff,1,r&0xff]); i=0
+        while i<len(levels):
+            j=i
+            while j+1<len(levels) and levels[j+1]==levels[i]: j+=1
+            dx,dy,dz=levels[i]
+            out+=bytes([(dx+126)&0xff,(dy+126)&0xff,(dz+126)&0xff,j-i])
+            i=j+1
+        out+=bytes([0])
+        return bytes(out)
     gregs=[]
     for toks,sm in gdata:
         out=bytearray()
-        for (v,r),nom in zip(toks,sm):
+        for tk,nom in zip(toks,sm):
+            if len(tk)==3:
+                v,r,levels=tk
+                out+=_tok_rle(v,r,levels)
+                continue
+            v,r=tk
             if smooth_fn is None or nom[2] is None:
                 out+=_tok(v,r)
             else:
@@ -635,6 +695,10 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     # is 6 (effL 13+13=26) not 4 (28), while ascending 13|15 stays 4 (13+15=28, right's h1
     # edges count in full); all 16 gaps fit incl the all-h1 tip (effL 0+9=9 -> 8).
     _effncs=[sum(1 for y in mycols(p) if h(planes[p][0],y)!=1) for p in range(m1)]
+    if yseam_lo is not None:
+        _effncs=mncs   # yseam chunks count h=1 cols in FULL for marker gaps (3455 high:
+                       # donor gap 6 = band(7+7), not band(3+7)) -- the h1-exclusion (3718)
+                       # is a non-seam rule. Provisional (one donor each side).
     mkgaps=[_mkband(_effncs[i]+mncs[i+1]) for i in range(nx-1)]
     def ncg(g):
         # group gap-band col count = y-SPAN of the line's col-set (incl holes), not present
@@ -717,8 +781,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     # nx4 y-band: pad -2 at y0' in {4,19,-10} i.e. (y0-8)%15 in (4,5) (3418/3187c1/3187c2;
     # y' 0/9/10 unaffected (3162/3420/3217), nx6 at y27 unaffected (3380c1)). Empirical;
     # smells like phase alignment -- revisit with more y-cells.
-    if nx==2: pad-=2   # nx2 cell: G11 3786 (maxnc6 flat-band) AND G24 3784 (maxnc13 curved)
-                       # both -2 -- first nx2 donors ever; 2 shapes, one position (provisional)
+    if nx==2 and yopen_hi is None: pad-=2
+                       # nx2 cell: G11 3786 (maxnc6 flat-band) AND G24 3784 (maxnc13 curved)
+                       # both -2 -- first nx2 donors ever; 2 shapes, one position (provisional).
+                       # yopen chunks sit back ON the base line (3430/3442 curved-Y lows,
+                       # item-14 2026-07-17); their yseam highs KEEP the -2 (byte-exact).
     if nx<=4 and (mycols(0)[0]-8)%7 in (4,5): pad-=2
     # ^ small-nx pad y-band is %7 (yp 4,5,11,12,19...), NOT the old %15 (aliased: donors sat
     #   at yp 4,5,19 where both agree; 3532/3534 yp11,12 pinned mod-7). Same 7-period as the
@@ -741,7 +808,11 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
         _gl=max(lead, lead_law(planes[0][0], mycols(0)[0], _nx=None))
     grp_off=mat_off+_gl-9
     if xseam_lo: grp_off+=10               # hook (3178c2); NOT stacked with yseam (3380 corner)
-    elif yseam_lo is not None: grp_off+=2  # hook (3187c2)
+    elif yseam_lo is not None and ((planes[0][0]-8)//9)%2==0:
+        grp_off+=2  # yseam hook is x-PERIODIC: +2 at x8 (3187c2 + x8 curved-Y highs) and
+                    # x27 (3380c2), ABSENT at x18 (3444/3452, item-14 2026-07-17). Fit =
+                    # alternating lead-9-periods ((x-8)//9 even). THREE cells only --
+                    # x36+ and mid-period x unpinned.
     if xseam_lo and yopen_hi is not None: grp_off-=2   # hook (3380 chunk (9,8,8))
     # NOTE: single-chunk donor 3497 (nx6 maxnc4, y8, z20) needs grp_off +2, but donors 3508
     # (nx8) & 3510 (nx5) are resid 0 -> the max(0,nx-maxnc) hypothesis is DEAD (not gap-based).
@@ -770,7 +841,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
 LAST_MC={}   # per-chunk mc of the most recent build_multichunk (mat byte can be bg-valued
              # 0x00/0xff and thus UNRECOVERABLE from scan bytes -- consumers fall back here)
 
-def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
+def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None, yseam_payload=True):
     """Split GLOBAL cols (construct-local voxel coords, chunk0 covers 0..31 per axis) at
     32-voxel chunk boundaries in X, Y and Z -> {(cx,cy,cz): scan}. mc: int, or dict keyed
     by chunk.
@@ -815,7 +886,7 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
             # Y PHANTOM COL := COPY of the S col (3400: donor T=(4,0) = copy-h; true
             # col only used for the flatness flags). X phantom plane likewise (copy ==
             # true on every existing donor; 3189's seam-adjacent planes are identical).
-            ycap=True; ymerge=True
+            ycap=True; ymerge=True; ynext=None
             if ys_hi:
                 Sy=hiy+1-loy
                 for (x,y) in [k for k in sub if k[1]==Sy+1]: del sub[(x,y)]
@@ -823,6 +894,10 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
                     sub[(x,Sy+1)]=sub[(x,Sy)]
                 ycap=all(IV.get((x+lox,hiy+2))==IV.get((x+lox,hiy+1))
                          for x in {k[0] for k in sub} if (x+lox,hiy+1) in IV)
+                # real height of the col PAST the open seam (S+1 = global hiy+2), per
+                # local x -- the tail token's ascending/flat test (phantom is a copy)
+                ynext={x: sum(b-a+1 for a,b in IV[(x+lox,hiy+2)])
+                       for x in {k[0] for k in sub} if (x+lox,hiy+2) in IV}
             if ys_lo:
                 ymerge=all(IV.get((x,loy-2))==IV.get((x,loy-1))
                            for x in {k[0]+lox for k in sub} if (x,loy-1) in IV)
@@ -853,5 +928,6 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
                 yseam_lo=(yf-loy) if ys_lo else None,
                 yopen_hi=(hiy+1-loy) if ys_hi else None,
                 zseam_lo=zs_lo, zopen_hi=zs_hi,
-                yopen_cap=ycap, yseam_merge=ymerge)
+                yopen_cap=ycap, yseam_merge=ymerge,
+                yseam_payload=yseam_payload, yopen_next=(ynext if ys_hi else None))
     return out

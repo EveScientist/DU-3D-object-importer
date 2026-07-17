@@ -123,9 +123,18 @@ def validate_scans(scans, voxels=None, strict=True):
             if strict:
                 raise ValueError(msg)
             warnings.append(msg)
-    if voxels is not None and len(scans) == 1:
+    if voxels is not None:
         cols = to_columns(voxels)
-        safe, reason = V.in_confidence_region(cols)
+        if len(scans) == 1:
+            safe, reason = V.in_confidence_region(cols)
+        else:
+            # multi-chunk: pass which 32-boundaries the shape crosses so the curved-Y
+            # envelope pockets (item 14) get flagged (single-chunk pockets don't apply)
+            xs = [x for x, _ in cols]; ys = [y for _, y in cols]
+            safe, reason = V.in_confidence_region(
+                cols,
+                xseam_lo=(min(xs) // 32 != max(xs) // 32),
+                yseam=(min(ys) // 32 != max(ys) // 32))
         if not safe:
             warnings.append(f"{reason} -- deploy at own risk / verify with a donor")
     return warnings

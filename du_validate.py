@@ -37,8 +37,13 @@ def _is_marker(D, i):
 def _read_token(D, i):
     """Parse one group token starting at i. Returns (length, kind, issue|None).
     plain  = [v,1,r,7e,7e,7e,r,0]                              (8B)
-    inplace= [v,1,0,dx,dy,dz,0,0]                              (8B, run-0 displaced)
-    expand = [v,1,r] + (r+1)*[dx,dy,dz,0] + [0]                (3 + 4*(r+1) + 1 B)"""
+    expand = [v,1,r] + RLE quads [dx,dy,dz,count] + [0]
+    The expanded grammar is RLE (item-14 decode 2026-07-17): each quad covers count+1
+    z-levels of displacement (dx,dy,dz relative to 126); quads accumulate until
+    sum(count+1) == run+1, then a single 0 terminator. The old all-quads-0-terminated
+    reading was the count==0 special case (per-level lists never repeat-compressed);
+    DU's encoder DOES compress repeats (seam smoothing payloads: 3400-3459 donors).
+    A run-0 displaced token [v,1,0,dx,dy,dz,0,0] is one RLE quad + terminator."""
     if i + 8 > len(D):
         return 0, None, "token truncated at end of scan"
     v, one, r = D[i], D[i + 1], D[i + 2]
@@ -46,18 +51,18 @@ def _read_token(D, i):
         return 0, None, f"token[{i}] second byte {one} != 1"
     if D[i + 3] == 0x7e and D[i + 4] == 0x7e and D[i + 5] == 0x7e and D[i + 6] == r and D[i + 7] == 0:
         return 8, "plain", None
-    if r == 0 and D[i + 6] == 0 and D[i + 7] == 0:
-        return 8, "inplace", None          # run-0 displaced token
-    # expanded: 3 + 4*(r+1) + 1 bytes, quads end in 0, final byte 0
-    ln = 3 + 4 * (r + 1) + 1
-    if i + ln > len(D):
-        return 0, None, f"expanded token[{i}] run {r} overruns scan"
-    for q in range(r + 1):
-        if D[i + 3 + 4 * q + 3] != 0:
-            return 0, None, f"expanded token[{i}] quad {q} not 0-terminated"
-    if D[i + ln - 1] != 0:
+    j = i + 3
+    lv = 0
+    while lv < r + 1:
+        if j + 4 > len(D):
+            return 0, None, f"expanded token[{i}] run {r} overruns scan"
+        lv += D[j + 3] + 1
+        j += 4
+    if lv != r + 1:
+        return 0, None, f"expanded token[{i}] RLE counts sum {lv} != run+1 {r + 1}"
+    if j >= len(D) or D[j] != 0:
         return 0, None, f"expanded token[{i}] missing final 0"
-    return ln, "expand", None
+    return j + 1 - i, "expand", None
 
 
 def parse_scan(scan):
@@ -226,13 +231,23 @@ def in_confidence_region(cols, xseam_lo=False, xopen_hi=False, yseam=False, zsea
     # to_columns(min_thickness=2) as its default for curved shapes.
     if xseam_lo or xopen_hi or yseam or zseam:
         if yseam:
-            # curved-Y crossings are only PARTIALLY decoded (item 14: yseam high-chunk
-            # boundary restructure + plateau/descending yopen tails + layout cells) --
-            # flag CURVED shapes; flat Y-crossings are proven (3187/3380).
-            ys_all = sorted(y for _, y in cols)
+            # curved-Y crossings: SOLVED 2026-07-17 (item 14, 18 donors): RLE payload-token
+            # grammar, always-merged yseam opener, always-present yopen tail, canonical
+            # payload laws, layout cells (nx2 pad, x-periodic grp hook, yseam marker gaps).
+            # Donor envelope: single Y crossing, single-interval cols, z8 base, x8-x20
+            # (+x27 flat), h<=11 incl h1 tails. OUTSIDE that envelope stays flagged:
             tops = {tuple(v[-1]) if isinstance(v, list) else tuple(v) for v in cols.values()}
             if len({t[1] for t in tops}) > 1:
-                return False, "curved shape crossing a Y chunk boundary: item-14 sub-decodes open"
+                if xseam_lo or xopen_hi or zseam:
+                    return False, "curved Y-crossing combined with X/Z crossing: no curved corner donor"
+                if any(isinstance(v, list) and len(v) > 1 for v in cols.values()):
+                    return False, "multi-interval (overhang) cols across a curved Y-seam: unprobed"
+                x0 = min(x for x, _ in cols)
+                if (x0 - 8) // 9 >= 3:
+                    return False, "curved Y-seam at x>=35: x-periodic grp hook cell unpinned"
+                zlo = min((v[0][0] if isinstance(v, list) else v[0]) for v in cols.values())
+                if zlo != 8:
+                    return False, "curved Y-seam with z base != 8: payload level anchor unprobed"
         return True, "seam/multi-chunk path (proven)"
     xs = sorted({x for x, _ in cols})
     nx = len(xs)

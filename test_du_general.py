@@ -408,4 +408,55 @@ try:
 except FileNotFoundError:
     print('13h deploy-proven dome: blueprint missing, skipped')
 
+# --- CURVED-Y-SEAM donors (item 14 SOLVED 2026-07-17): RLE payload-token grammar ---
+# Payload tokens (yseam opener / interior seam-T / yopen tail) carry DU's seam-smoothing
+# displacement (+14/+42 = 1/6 / half vox). Payload is BUILD STATE, not a shape function:
+# 3400 vs 3446 = identical shape, different payload bytes. Generator emits the canonical
+# fresh-build form; donors split three ways:
+#   byte-exact (canonical builds), payload=False byte-exact (3438/3450 exported plain
+#   opener/interior-T), structural-only (stale incremental-edit builds: payload quads
+#   differ, every val/run/gap/offset identical -- verified via payload-masked compare).
+_P3400=[2,3,4,5,6,6,5,4,3,2]; _RAMP=[2,3,4,5,6,7,8,9,10,11]
+def _ycols(xr,hh): return {(x,27+j):(8,8+h-1) for x in xr for j,h in enumerate(hh)}
+_cys=[  # (donor, xrange, heights y27.., yseam_payload, expect: 'exact'|'lowmask'|'mask')
+ ('3430', range(8,10),  _P3400, True,  'exact'),
+ ('3432', range(8,11),  _RAMP,  True,  'exact'),
+ ('3434', range(8,11),  [2,5,5,5,6,7,9,9,9,11], True, 'exact'),
+ ('3438', range(8,12),  _RAMP,  False, 'exact'),
+ ('3442', range(8,10),  _RAMP,  True,  'exact'),
+ ('3444', range(18,21), _P3400, True,  'exact'),
+ ('3446', range(8,11),  _P3400, True,  'exact'),
+ ('3450', range(8,11),  [2,4,6,8,8,7,6,4,2,1], False, 'exact'),
+ ('3452', range(18,21), _P3400, True,  'exact'),
+ ('3459', range(8,11),  [2,3,4,5,6,6,5,2,2,2], True, 'exact'),
+ ('3400', range(8,11),  _P3400, True,  'mask'),     # stale: dy+42 opener segs + reversed tail
+ ('3428', range(8,12),  _P3400, True,  'mask'),     # stale: same family as 3400
+ ('3436', range(8,11),  [2,4,6,8,10,9,7,5,3,2], True, 'mask'),  # stale: +X dy segs, dbl +14 tail
+ ('3447', range(8,11),  [2,3,4,5,6,6,4,3,2,2], True, 'lowmask'),  # DROP chain: stale low tails
+ ('3448', range(8,11),  [2,3,4,5,6,6,3,2,2,2], True, 'lowmask'),
+ ('3454', range(8,11),  [2,3,4,5,6,6,2,2,2,2], True, 'lowmask'),
+ ('3455', range(8,11),  [2,3,4,5,6,6,1,1,1,1], True, 'lowmask'),
+ ('3457', range(8,11),  [2,4,6,8,8,8,7,4,2,1], True, 'lowmask'),
+]
+import du_validate as _dv
+def _masksig(B):
+    P=_dv.parse_scan(B)
+    return (P['lead'], tuple(P['markers']), P['mat_off'],
+            tuple(tuple((t[1][0],t[1][2]) for t in ln) for ln in P['groups']),
+            tuple(P['issues']))
+for _n,_xr,_hh,_pl,_ex in _cys:
+    _don=mchunks(_n)
+    _gen=dg.build_multichunk(_ycols(_xr,_hh), {k:v[1] for k,v in _don.items()},
+                             yseam_payload=_pl)
+    for _k in sorted(_don):
+        _D=_don[_k][0]; _S=_gen.get(_k)
+        _exact = _S==_D
+        if _ex=='exact' or (_ex=='lowmask' and _k[1]==9):
+            ok=_exact; tag='BYTE-EXACT' if ok else 'DIFFERS'
+        else:
+            ok=_masksig(_S)==_masksig(_D)
+            tag=('BYTE-EXACT' if _exact else 'STRUCT-EXACT (stale payload)') if ok else 'STRUCT MISMATCH'
+        allok&=ok
+        print(f'CYS {_n} chunk{_k}: {tag}')
+
 print('=== REGRESSION:', 'ALL BYTE-EXACT' if allok else 'FAILURES ABOVE', '===')
