@@ -49,10 +49,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     voxels = {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in solid}
     smooth_fn = None
     if want_anchors and anchors:
-        shifted = {tuple(k[i] + d[i] for i in range(3)): v for k, v in anchors.items()}
-        def smooth_fn(x, y, z):
-            a = shifted.get((x, y, z))
-            return a[0] if a is not None else (x, y, z)
+        smooth_fn = VX.anchor_smooth_fn(anchors, delta=d)   # shifts key AND target by d
     return voxels, smooth_fn
 
 

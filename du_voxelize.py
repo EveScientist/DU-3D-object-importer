@@ -19,6 +19,7 @@ Design notes:
     the mesh is a single outer surface and you want an empty interior.
   * The anchor map is what makes "forcibly smooth a jagged curve" cheap and exact.
 """
+import math
 import numpy as np
 
 
@@ -153,6 +154,57 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz):
                         anchors[corner] = (tuple(q), d2)
 
 
+def solid_by_containment(verts, faces, grid):
+    """Mesh-tight solid: a voxel is filled iff its CENTER is inside the mesh, via z-ray
+    even-odd parity (scanline). The resulting boundary sits ON the surface (unlike the
+    conservative SAT band), so surface-vertex corners are within +-0.5 vox of the mesh and
+    smoothing deflections stay sub-voxel like the game's own smooth exports. Watertight
+    meshes required for a correct interior (matches DU's own importer expectation)."""
+    v0 = verts[faces[:, 0]]; v1 = verts[faces[:, 1]]; v2 = verts[faces[:, 2]]  # (M,3)
+    solid = set()
+    for x in range(grid):
+        px = x + 0.5
+        # triangles whose x-range contains px
+        xmin = np.minimum(np.minimum(v0[:, 0], v1[:, 0]), v2[:, 0])
+        xmax = np.maximum(np.maximum(v0[:, 0], v1[:, 0]), v2[:, 0])
+        mx = (xmin <= px) & (px <= xmax)
+        if not mx.any():
+            continue
+        a0, a1, a2 = v0[mx], v1[mx], v2[mx]
+        for y in range(grid):
+            py = y + 0.5
+            ymin = np.minimum(np.minimum(a0[:, 1], a1[:, 1]), a2[:, 1])
+            ymax = np.maximum(np.maximum(a0[:, 1], a1[:, 1]), a2[:, 1])
+            my = (ymin <= py) & (py <= ymax)
+            if not my.any():
+                continue
+            zs = _ray_z_hits(a0[my], a1[my], a2[my], px, py)
+            if len(zs) < 2:
+                continue
+            zs.sort()
+            for i in range(0, len(zs) - 1, 2):
+                z0 = int(math.ceil(zs[i] - 0.5)); z1 = int(math.floor(zs[i + 1] - 0.5))
+                for z in range(max(0, z0), min(grid - 1, z1) + 1):
+                    solid.add((x, y, z))
+    return solid
+
+
+def _ray_z_hits(v0, v1, v2, px, py):
+    """z of intersections of the +z ray through (px,py) with triangles (barycentric)."""
+    # solve px,py in triangle -> bary (u,v); z = w0*z0+... Vectorized Cramer.
+    x0, y0 = v0[:, 0], v0[:, 1]
+    e1x, e1y = v1[:, 0] - x0, v1[:, 1] - y0
+    e2x, e2y = v2[:, 0] - x0, v2[:, 1] - y0
+    det = e1x * e2y - e2x * e1y
+    ok = np.abs(det) > 1e-12
+    rx, ry = px - x0, py - y0
+    u = np.where(ok, (rx * e2y - e2x * ry) / np.where(ok, det, 1), -1)
+    v = np.where(ok, (e1x * ry - rx * e1y) / np.where(ok, det, 1), -1)
+    inside = ok & (u >= 0) & (v >= 0) & (u + v <= 1)
+    z = v0[:, 2] + u * (v1[:, 2] - v0[:, 2]) + v * (v2[:, 2] - v0[:, 2])
+    return list(z[inside])
+
+
 def fill_solid(surface, grid):
     """Watertight interior via even-odd z-parity of surface crossings per (x,y) column.
     Robust to the conservative surface shell (collapses runs of adjacent surface voxels to
@@ -179,22 +231,45 @@ def fill_solid(surface, grid):
     return out
 
 
-def voxelize(verts, faces, grid, hollow=False, want_anchors=True):
-    """Full voxelization -> (voxels, anchors). hollow=False fills the watertight interior
-    (caves/holds preserved as modeled voids); hollow=True keeps the surface shell only."""
+def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain'):
+    """Full voxelization -> (voxels, anchors).
+
+    solid_mode='contain' (default): mesh-tight solid by center-in-mesh z-parity -- the
+        boundary sits on the surface so smoothing deflections stay sub-voxel (like the
+        game's exports). Best for smoothing; needs a watertight mesh.
+    solid_mode='band': conservative SAT surface + span fill -- robust to non-manifold
+        meshes but the boundary sits ~1 vox proud (blockier, larger smoothing offsets).
+    hollow=True: surface shell only (no interior), for hulls with a modeled outer skin.
+
+    Anchors ({surface corner -> nearest mesh point}) always come from the SAT surface pass
+    so the smoothing layer has a projection target for every boundary vertex."""
     surface, anchors = voxelize_surface(verts, faces, grid, want_anchors=want_anchors)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
-    voxels = surface if hollow else fill_solid(surface, grid)
+    if hollow:
+        voxels = surface
+    elif solid_mode == 'contain':
+        voxels = solid_by_containment(verts, faces, grid)
+        if not voxels:              # degenerate/open mesh: fall back to the band fill
+            voxels = fill_solid(surface, grid)
+    else:
+        voxels = fill_solid(surface, grid)
     return voxels, anchors
 
 
-def anchor_smooth_fn(anchors, offset=0):
-    """Build a smooth_fn(x,y,z)->target from an anchor map for du_semantic's pos_fn. offset
-    shifts grid coords into construct-local space if the shape was translated after
-    voxelization (pass the same delta used to place the shape)."""
+def anchor_smooth_fn(anchors, delta=(0, 0, 0)):
+    """Build a smooth_fn(x,y,z)->target from an anchor map for du_semantic's pos_fn.
+    `delta` is the per-axis translation applied to place the shape AFTER voxelization --
+    it must be applied to BOTH the lookup key AND the returned mesh point, so the target
+    is expressed in the same (placed) frame as the query. (Shifting only the key is the
+    dep19b bug: targets landed in the pre-placement frame and every deflection saturated
+    at the +-100 clamp -> spiky, not smooth.)"""
+    dx, dy, dz = delta
+    shifted = {(k[0] + dx, k[1] + dy, k[2] + dz):
+               (v[0][0] + dx, v[0][1] + dy, v[0][2] + dz)
+               for k, v in anchors.items()}
+
     def smooth_fn(x, y, z):
-        key = (x - offset, y - offset, z - offset) if offset else (x, y, z)
-        a = anchors.get(key)
-        return a[0] if a is not None else (x, y, z)
+        t = shifted.get((x, y, z))
+        return t if t is not None else (x, y, z)
     return smooth_fn
