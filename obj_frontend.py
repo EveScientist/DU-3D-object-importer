@@ -11,7 +11,7 @@ objtodu.evescientist.net calls.
 The voxelizer (obj_to_du_voxels.voxelize, surface SAT) is intentionally SWAPPABLE -- pass
 your own voxelize_fn(verts, faces, grid)->set to try a different algorithm.
 """
-from obj_to_du_voxels import load_obj, fit_to_grid, voxelize as _default_voxelize
+import du_voxelize as VX
 import obj_pipeline as P
 import du_envelope as E
 
@@ -19,57 +19,53 @@ import du_envelope as E
 CORE_ORIGIN = 8
 
 
-def voxelize_obj(obj_path, size='M', fill_fraction=0.9, fill='z', margin=None,
-                 grid=None, voxelize_fn=None):
-    """.obj -> solid voxel set in construct-local coords (min corner at CORE_ORIGIN).
+def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
+                 grid=None, want_anchors=False):
+    """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
 
     size           core size name (XS..XXXXXL); sets the voxel resolution unless `grid`.
     fill_fraction  fraction of the core edge the longest mesh axis fills (0<f<=1) --
-                   this is the SCALING control the user picks.
+                   the SCALING control the user picks.
     grid           override: absolute voxel resolution of the longest mesh axis.
-    fill           'z' (span per column), 'parity' (even-odd, hollows), 'none' (surface).
-    voxelize_fn    optional custom voxelizer(verts, faces, grid)->set of (x,y,z).
+    hollow         False = watertight solid (caves/holds preserved as modeled voids);
+                   True = surface shell only.
+    want_anchors   also return a smooth_fn projecting each surface vertex to the nearest
+                   mesh point (the "forcibly smooth a jagged edge" deflection), else None.
     """
     core_vox = E.core_voxel_size(size)
     if grid is None:
         grid = max(1, int(round(core_vox * fill_fraction)))
     if grid > core_vox:
         raise ValueError(f"grid {grid} exceeds {size} core voxel size {core_vox}")
-    if margin is None:
-        margin = max(1, (core_vox - grid) // 2)   # centre the shape in the core
-    verts, faces = load_obj(obj_path)
-    # fit into a `grid`-sized cube (the mesh's own bounding box maps to [margin, grid-margin])
-    verts, _ = fit_to_grid(verts, grid, margin=0)
-    vox = (voxelize_fn or _default_voxelize)(verts, faces, grid)
-    if not vox:
-        raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
-    if fill == 'z':
-        solid = P.solid_fill_z(vox)
-    elif fill == 'parity':
-        solid = P.solid_fill_parity(vox)
-    elif fill == 'none':
-        solid = vox
-    else:
-        raise ValueError(f'unknown fill mode {fill!r}')
-    # translate so the shape's min corner sits at CORE_ORIGIN, centred within the core
+    verts, faces = VX.load_obj(obj_path)
+    verts, _ = VX.fit_to_grid(verts, grid, margin=0)
+    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
+                                 want_anchors=want_anchors)
+    # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core
     lo = [min(v[i] for v in solid) for i in range(3)]
     ex = [max(v[i] for v in solid) - lo[i] + 1 for i in range(3)]
     d = tuple(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i]
               for i in range(3))
-    return {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in solid}
+    voxels = {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in solid}
+    smooth_fn = None
+    if want_anchors and anchors:
+        shifted = {tuple(k[i] + d[i] for i in range(3)): v for k, v in anchors.items()}
+        def smooth_fn(x, y, z):
+            a = shifted.get((x, y, z))
+            return a[0] if a is not None else (x, y, z)
+    return voxels, smooth_fn
 
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
-                     fill='z', grid=None, name=None, material=None, smooth_fn=None,
-                     voxelize_fn=None):
-    """Full pipeline: .obj file -> .blueprint file for a chosen core size.
-    Returns (voxel_count, lod_record_set)."""
-    voxels = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction, fill=fill,
-                          grid=grid, voxelize_fn=voxelize_fn)
+                     hollow=False, smooth=False, grid=None, name=None, material=None):
+    """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
+    onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
+    voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
+                                     hollow=hollow, grid=grid, want_anchors=smooth)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
-    want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn,
+    want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn if smooth else None,
                                  material=material, size=size, core_type=core_type)
     return len(voxels), want
 
@@ -86,11 +82,12 @@ if __name__ == '__main__':
     ap.add_argument('--fill-fraction', type=float, default=0.9,
                     help='fraction of the core the mesh fills (0<f<=1, default 0.9)')
     ap.add_argument('--grid', type=int, default=None, help='absolute voxel resolution override')
-    ap.add_argument('--fill', choices=('z', 'parity', 'none'), default='z')
+    ap.add_argument('--hollow', action='store_true', help='surface shell only (no solid fill)')
+    ap.add_argument('--smooth', action='store_true', help='deflect vertices onto the mesh')
     ap.add_argument('--name', default=None)
     args = ap.parse_args()
     n, want = obj_to_blueprint(args.obj, args.out, size=args.size, core_type=args.core_type,
                                fill_fraction=args.fill_fraction, grid=args.grid,
-                               fill=args.fill, name=args.name)
+                               hollow=args.hollow, smooth=args.smooth, name=args.name)
     print(f'{args.obj} -> {args.out}: {n} voxels, {len(want)} records, {args.size} '
           f'{args.core_type} core')
