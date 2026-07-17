@@ -154,39 +154,59 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz):
                         anchors[corner] = (tuple(q), d2)
 
 
-def solid_by_containment(verts, faces, grid):
-    """Mesh-tight solid: a voxel is filled iff its CENTER is inside the mesh, via z-ray
-    even-odd parity (scanline). The resulting boundary sits ON the surface (unlike the
-    conservative SAT band), so surface-vertex corners are within +-0.5 vox of the mesh and
-    smoothing deflections stay sub-voxel like the game's own smooth exports. Watertight
-    meshes required for a correct interior (matches DU's own importer expectation)."""
-    v0 = verts[faces[:, 0]]; v1 = verts[faces[:, 1]]; v2 = verts[faces[:, 2]]  # (M,3)
-    solid = set()
-    for x in range(grid):
-        px = x + 0.5
-        # triangles whose x-range contains px
-        xmin = np.minimum(np.minimum(v0[:, 0], v1[:, 0]), v2[:, 0])
-        xmax = np.maximum(np.maximum(v0[:, 0], v1[:, 0]), v2[:, 0])
-        mx = (xmin <= px) & (px <= xmax)
-        if not mx.any():
+def _scan_axis(verts, faces, grid, axis):
+    """Inside-voxel set by casting rays ALONG `axis` (0=x,1=y,2=z) through each cell centre
+    of the other two axes, even-odd parity. Permute so the ray axis is last, run the z-scan,
+    permute back."""
+    p = [i for i in range(3) if i != axis] + [axis]     # ray axis last
+    inv = [p.index(i) for i in range(3)]
+    V = verts[:, p]
+    v0 = V[faces[:, 0]]; v1 = V[faces[:, 1]]; v2 = V[faces[:, 2]]
+    amin = np.minimum(np.minimum(v0, v1), v2)
+    amax = np.maximum(np.maximum(v0, v1), v2)
+    inside = set()
+    for a in range(grid):
+        pa = a + 0.5
+        ma = (amin[:, 0] <= pa) & (pa <= amax[:, 0])
+        if not ma.any():
             continue
-        a0, a1, a2 = v0[mx], v1[mx], v2[mx]
-        for y in range(grid):
-            py = y + 0.5
-            ymin = np.minimum(np.minimum(a0[:, 1], a1[:, 1]), a2[:, 1])
-            ymax = np.maximum(np.maximum(a0[:, 1], a1[:, 1]), a2[:, 1])
-            my = (ymin <= py) & (py <= ymax)
-            if not my.any():
+        b0, b1, b2 = v0[ma], v1[ma], v2[ma]
+        bmn = amin[ma]; bmx = amax[ma]
+        for b in range(grid):
+            pb = b + 0.5
+            mb = (bmn[:, 1] <= pb) & (pb <= bmx[:, 1])
+            if not mb.any():
                 continue
-            zs = _ray_z_hits(a0[my], a1[my], a2[my], px, py)
-            if len(zs) < 2:
+            cs = _ray_z_hits(b0[mb], b1[mb], b2[mb], pa, pb)
+            if len(cs) < 2:
                 continue
-            zs.sort()
-            for i in range(0, len(zs) - 1, 2):
-                z0 = int(math.ceil(zs[i] - 0.5)); z1 = int(math.floor(zs[i + 1] - 0.5))
-                for z in range(max(0, z0), min(grid - 1, z1) + 1):
-                    solid.add((x, y, z))
-    return solid
+            cs.sort()
+            for i in range(0, len(cs) - 1, 2):
+                c0 = int(math.ceil(cs[i] - 0.5)); c1 = int(math.floor(cs[i + 1] - 0.5))
+                for c in range(max(0, c0), min(grid - 1, c1) + 1):
+                    cell = (a, b, c)                        # in permuted frame
+                    inside.add((cell[inv[0]], cell[inv[1]], cell[inv[2]]))
+    return inside
+
+
+def solid_by_containment(verts, faces, grid, robust=True):
+    """Mesh-tight solid: a voxel is filled iff its CENTRE is inside the mesh. The boundary
+    sits ON the surface (unlike the conservative SAT band), so surface-vertex corners are
+    within +-0.5 vox of the mesh and smoothing deflections stay sub-voxel like the game's
+    own smooth exports. Watertight meshes required for a correct interior.
+
+    robust=True casts rays along ALL THREE axes and MAJORITY-votes (>=2 of 3) -- this fixes
+    the single-axis degeneracies (rays grazing shared triangle edges/vertices) that leave
+    'knife-cut' missing columns on grid-aligned meshes like a UV sphere (dep19d). robust=
+    False is the fast single z-scan (fine for meshes without axis-aligned edges)."""
+    if not robust:
+        return _scan_axis(verts, faces, grid, 2)
+    from collections import Counter
+    votes = Counter()
+    for axis in (0, 1, 2):
+        for v in _scan_axis(verts, faces, grid, axis):
+            votes[v] += 1
+    return {v for v, n in votes.items() if n >= 2}
 
 
 def _ray_z_hits(v0, v1, v2, px, py):
