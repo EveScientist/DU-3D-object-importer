@@ -223,6 +223,63 @@ def _scan_mc(scan):
                          "use du_general.LAST_MC from the build")
     return 512+P['mat']
 
+def build_blueprint_sem(template_path, out_path, voxels, name, smooth_fn=None,
+                        yseam_payload=True, material=None):
+    """From-scratch blueprint via the SEMANTIC emitter (du_semantic, 2026-07-18): every
+    record body generated whole (header+streams+mapping) -- no scans, no mc recovery, no
+    template LOD body. h3 = real cells; h4-h7 = EMPTY cells (DU regenerates LODs from h3
+    client-side -- deploy-proven since Deployment 13). voxels in construct-local coords
+    (chunk0 (8,8,8) covers 0..31). smooth_fn(x,y,z)->target point (local coords) maps to
+    per-vertex-cell positions (84 steps/voxel, clamp +/-100 as deploy-proven)."""
+    import json, copy
+    import du_semantic, du_validate
+    OFF = 256    # local coord 0 == absolute cell 256 (chunk key * 32)
+    vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
+    cols = to_columns(voxels)
+    xs = [x for x, _ in cols]; ys = [y for _, y in cols]
+    safe, reason = du_validate.in_confidence_region(
+        cols,
+        xseam_lo=(min(xs) // 32 != max(xs) // 32),
+        yseam=(min(ys) // 32 != max(ys) // 32))
+    if not safe:
+        print(f"[validate] WARNING: {reason} -- deploy at own risk / verify with a donor")
+    pos_fn = None
+    if smooth_fn is not None:
+        def pos_fn(p):
+            P = (p[0] - OFF, p[1] - OFF, p[2] - OFF)
+            T = smooth_fn(*P)
+            d = [max(-100, min(100, round(84 * (T[i] - P[i])))) for i in range(3)]
+            if d == [0, 0, 0]:
+                return None
+            return (126 + d[0], 126 + d[1], 126 + d[2])
+    mat = material or du_semantic.MAT_HCCARBON
+    bp = json.load(open(template_path))
+    out = copy.deepcopy(bp)
+    proto = copy.deepcopy(out['VoxelData'][0])
+    want = compute_lod_set_mc(voxels)
+    entries = []
+    for (h, x, y, z) in sorted(want):
+        e = copy.deepcopy(proto)
+        e['h'] = h
+        for k, v in (('x', x), ('y', y), ('z', z)):
+            e[k] = {'$numberLong': v}
+        io = (32 * x, 32 * y, 32 * z)
+        if h == 3:
+            body = du_semantic.build_cell(vox_abs, io, material=mat, pos_fn=pos_fn,
+                                          yseam_payload=yseam_payload)
+        else:
+            body = du_semantic.build_cell(set(), io,
+                mapping=[(du_semantic.MAT_DEBUG1[0], du_semantic.MAT_DEBUG1[1], 1)])
+        b64, hsh = _encode_body(body)
+        e['records']['voxel']['data']['$binary'] = b64
+        e['records']['voxel']['hash']['$numberLong'] = hsh
+        entries.append(e)
+    out['VoxelData'] = entries
+    out['Model']['Name'] = name
+    json.dump(out, open(out_path, 'w'))
+    return want
+
+
 def build_blueprint_mc(template_path, out_path, scans, voxels, name, mc=None):
     """From-scratch MULTI-CHUNK blueprint. scans: {(cx,cy,cz): h3_scan}. Builds every LOD
     entry from compute_lod_set_mc: h3 = real body (build_h3_body w/ mc-law), h4-h7 = the

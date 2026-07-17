@@ -68,6 +68,8 @@ def canonical_y_payload(voxels, io, zlo=None, zhi=None):
     non-ascending donor carries it, incl the otherwise-plain 3450); the SEAM-side
     payload is the build-state-nondeterministic half (yseam_payload toggles it;
     3438/3450 exported plain)."""
+    if not voxels:
+        return {}, {}
     if zlo is None:
         zlo = min(v[2] for v in voxels)
         zhi = max(v[2] for v in voxels)
