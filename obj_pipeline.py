@@ -154,6 +154,36 @@ def _h6_full(voxels):
     mn,mid,mx=ex
     return mn>=4 or mx>=6 or (mx<=4 and mid>=4)
 
+def core_octree_params(size):
+    """(max_h, chunk0, OFF) for a core size, derived from blueprint.rs create_lods:
+    height = CoreSize.height()-3; octree is 2^height leaf-chunks/axis at origin 0; record
+    h = trailing_zeros(node_extent)+3 so levels run h3..h(CoreSize.height()); the shape's
+    local chunk 0 maps to octree chunk 2^(height-1) (M: height4 -> chunk 8, matches donors);
+    the emitter voxel origin OFF = chunk0*32 (M -> 256)."""
+    import du_envelope
+    core_h = du_envelope.core_height(size)      # CoreSize.height(): XS5..M7..L8
+    height = core_h - 3                          # create_lods height: XS2,S3,M4,L5
+    chunk0 = 1 << (height - 1)                   # centre chunk: M->8, S->4, XS->2, L->16
+    return core_h, chunk0, chunk0 * 32
+
+
+def compute_lod_set_octree(voxels, size, chunk0=None):
+    """MINIMAL valid octree {(h,x,y,z)} for a core size: every non-empty leaf chunk (h3)
+    plus ALL its ancestors up to the single root h(CoreSize.height()). No phantom neighbours
+    -- DU regenerates LOD content from h3 on import, so the coarse nodes only need to exist
+    and form a complete tree. Leaf coords = chunk0 + voxel//32."""
+    core_h, ck0, _ = core_octree_params(size)
+    if chunk0 is None:
+        chunk0 = (ck0, ck0, ck0)
+    leaves = {tuple(chunk0[i] + [p[0], p[1], p[2]][i] // 32 for i in range(3))
+              for p in voxels}
+    want = {(3,) + c for c in leaves}
+    for L in range(4, core_h + 1):
+        shift = L - 3
+        want |= {(L,) + tuple(c[i] >> shift for i in range(3)) for c in leaves}
+    return want
+
+
 def compute_lod_set_mc(voxels, chunk0=(8,8,8)):
     """LOD chunk SET {(h,x,y,z)} for a single- OR multi-chunk shape. Octree: per axis, each
     coarser level's range = [lo>>L .. hi>>L] with a low phantom neighbour, taken as the
@@ -243,13 +273,13 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     until then they raise unless allow_unverified_size=True (for those deploy tests)."""
     import json, copy
     import du_semantic, du_envelope
-    if size.upper() != 'M' and not allow_unverified_size:
+    size = size.upper()
+    if size != 'M' and not allow_unverified_size:
         raise ValueError(
-            f"core size {size!r} is NOT deploy-verified: compute_lod_set_mc emits the M-core "
-            f"octree (chunk0=8, h3..h7), which panics DU under a non-128 Model.Size. Only 'M' "
-            f"is proven. Pass allow_unverified_size=True to build a deploy TEST for another "
-            f"size (expect to iterate on the octree layout).")
-    OFF = 256    # local coord 0 == absolute cell 256 (chunk key * 32)
+            f"core size {size!r} is not yet deploy-verified. Only 'M' is proven in-game. "
+            f"Pass allow_unverified_size=True to build a deploy TEST for another size (uses "
+            f"the derived per-core octree from core_octree_params; verify it renders).")
+    core_h, chunk0, OFF = core_octree_params(size)
     vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
     safe, reasons = du_semantic.semantic_confidence(voxels)
     for r in reasons:
@@ -271,7 +301,9 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             return (126 + d[0], 126 + d[1], 126 + d[2])
     mat = material or du_semantic.MAT_HCCARBON
     proto = copy.deepcopy(json.load(open(record_template))['VoxelData'][0])
-    want = compute_lod_set_mc(voxels)
+    # M keeps the deploy-proven phantom LOD set; other sizes use the minimal octree.
+    want = (compute_lod_set_mc(voxels, chunk0=(chunk0,) * 3) if size == 'M'
+            else compute_lod_set_octree(voxels, size))
     entries = []
     for (h, x, y, z) in sorted(want):
         e = copy.deepcopy(proto)
