@@ -410,3 +410,54 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
 - **tests/deployment13g_dome_r4.blueprint** — radius-4 dome, BYTE-EXACT to DOMER4 donor (will render). AWAITING DEPLOY (confirms novel curved+narrowing dome end-to-end).
 - **tests/deployment13h_dome_r5.blueprint** — radius-5 dome, maxnc11 pad EXTRAPOLATED (base 237). Group content correct; pad is a guess. Deploy after 13g.
 - **DEPLOYMENT 13g + 13h RENDERED PERFECTLY (2026-07-13)** — radius-4 (maxnc9) AND radius-5 (maxnc11) domes both import+render clean. ARC #13 CORE PROVEN: voxel occupancy -> to_columns -> build_multichunk -> deploy renders novel curved+narrowing domes. maxnc11 extrapolated pad (base 237) CONFIRMED correct by 13h. The 8-deploy dome saga is CLOSED.
+
+## 2026-07-14 session — multi-chunk verification, layout laws, cavity/window/sealed arcs
+
+| BP | What | Coords (game .5 = voxel index) | Chunks | Result |
+|----|------|-------------------------------|--------|--------|
+| 3493 | X-seam nc8 box (Deployment-14 shape hand-built) | x28.5-39.5 y10.5-17.5 z8.5-11.5 | (8,8,8)+(9,8,8) | Cracked 2 laws: _LEAD cell +1 (→ closed-form lead x-law later) + pad flat/curved split maxnc7/8. BYTE-EXACT after. |
+| 3497 | A: lead cell2 @x0=19 (nx6 nc4) | x19.5-24.5 y8.5-11.5 z20.5-23.5 | (8,8,8) | Lead 203 (killed cell2=20 table) + exposed grp_off+2 anomaly (nx6 pocket, UNRESOLVED). |
+| 3500 | B: flat nx8 nc8 | x12.5-19.5 y13.5-20.5 z8.5-11.5 | (8,8,8) | BYTE-EXACT — pad flat/curved split CONFIRMED. |
+| 3502/3504/3506 | S1-S3 lead sweep x0=16/17/18 (nx4 nc4 z8) | x{16,17,18}.5+3 y8.5-11.5 z8.5-11.5 | (8,8,8) | Consecutive run 16-21 → LEAD X-LAW xt=10xp-2·ceil(xp/5) (+2 xp1,2). All 11 pts exact. |
+| 3508/3510 | C/D grp_off gap probes (nx8/nx5) | x20.5+8 y24.5-27.5 z12.5-15.5 / x9.5+5 y18.5-21.5 z24.5-27.5 | (8,8,8) | Both resid 0 → killed max(0,nx-maxnc) rule. |
+| 3512/3514/3516/3518 | E/F/G/H nx6 isolation grid (x9/x19 × z8/z20) | nx6 nc4 boxes | (8,8,8) | Grid: x9→pad+2 (z-indep); x19,z20→grp_off+2; x19,z8 CLEAN. Tangled nx6×x0×z pocket — DEFERRED, guarded (nx==6 flag). |
+| 3520-3534 | YA-YC + Y1-Y5 lead y-sweep (nx3! boxes) | x8.5-10.5 y varies z8.5-11.5 | (8,8,8) | Sweep was nx3-CONTAMINATED (nx3 has own y-transitions). Old y-law 2*((yp+4)//9) CONFIRMED for nx>=4. |
+| 3536 | A: square tube 5x5, 1x1 hole | x8.5-12.5 y8.5-12.5 z8.5-11.5, hole (10,10) | (8,8,8) | Cracked SPAN principle (holes counted in y-span; +35/absent marker). BYTE-EXACT. |
+| 3538/3540/3542 | CB/CC/CD: 2x2 hole, off-center, 1x2 slot | 4x4 & 5x5 tubes z8.5-11.5 | (8,8,8) | All BYTE-EXACT (+X-boundary span + void-exit wall + both-absent skip). |
+| 3544/3546 | VE1 (2x3 hole) / VE2 (2x2 h5) | x8.5-11.5 y8.5-13.5 / 4x4 z8.5-12.5 | (8,8,8) | void-exit = 33-h+35*(w-1); ncg gap-band uses span. BYTE-EXACT. |
+| 3548 | SB: sealed hollow 5^3 shell (1-THICK walls) | x/y/z 8.5-12.5, core 3^3 hollow | (8,8,8) | h=1 GOLDMINE: markers fine (h-1=0, ig-1 law); group = all-singles edge mode (h=1 arc, OPEN). Shape unsupported (1-thick). |
+| 3550/3552/3554/3556 | PW1/W2/W4/W5 windows (1x2, 1x3, 2-wide, 3-deep wall) | walls y8.5-9.5(-10.5) x8.5-12.5 | (8,8,8) | WINDOW grammar: WVOID + interval-chain + interior overhang. All BYTE-EXACT. |
+| 3559/3561/3563/3565 | MW1-MW4': two windows / stacked / 3-wide / diff-z | walls x8.5-12.5 | (8,8,8) | Region-based WVOID + chain VALUE law (h_k-2, void_h). All BYTE-EXACT. |
+| 3567/3569 | SC1 solid 5^3 / SC2 sealed 7^3 shell 2-thick | x/y/z 8.5-12.5 / 8.5-14.5 core 10.5-12.5 | (8,8,8) | SEALED CAVITY = window chain DIRECTION-SYMMETRIC (Y-face rule). Both BYTE-EXACT. |
+| 3571/3573 | SC3 non-cubic cavity / SC4 two cavities | 8x7x6 box core 4x2x2 / 10x6x6 box 2 cores | (8,8,8) | SC3 exact; SC4 → pad nx-kink discovery. |
+| 3575/3577 | SC5 solid nx10 / SC6 one cavity | x8.5-17.5 y8.5-13.5 z8.5-13.5 | (8,8,8) | PAD NX-KINK: +2*((nx-5)//5) when nx>=10 & nx>=maxnc & no seam (B16 exempt nx<nc; subsumes old nx>=20+6). All BYTE-EXACT. Reg=76. |
+| 3579/3581/3583 | H1 plate / H2 x-step / H3 y-step (h=1 isolation) | 4x4 @z8: h1 plate; x8-9 h2+x10-11 h1; y8-9 h2+y10-11 h1 | (8,8,8) | h=1 GROUP MODE: wall touching h=1 col = single edge-form (bval, max h); markers/openers/closes unchanged. All BYTE-EXACT. |
+| 3585 | H4 wedge staircase h3/h2/h1 | x8-9 z8-10, x10-11 z8-9, x12-13 z8 (y8-11) | (8,8,8) | SHADOW-OPENER generalization: identical pair after taller plane = _F(L). BYTE-EXACT. |
+| 3586 | H5 far plate | x14.5-17.5 y14.5-17.5 z20.5 | (8,8,8) | h=1 content ALL correct; pad -2 = deferred single-chunk ±2 pocket (y'6/z20). Not in reg. |
+| 3588 | H6 1-tall gap (PW2 shape) | wall x8.5-12.5 y8.5-9.5 z8.5-13.5, remove (10.5, z11.5) | (8,8,8) | DU emits VAL-0x00 MARKER for ig=1 (legal!); parser fixed, encoder was right. BYTE-EXACT. |
+| 3548 | (revisited) 1-thick sealed shell | 5^3 shell | (8,8,8) | h=1+cavity integration: 4-corner deck rule. BYTE-EXACT. Reg=82. |
+| 3590/3592 | C1 diamond / C2 round dome with h=1 RIMS (curved-h1 probes) | C1: 3x5 diamond h1-3 @x8-10; C2: DOMER3-1 @x13-19 y13-19 h1-3 | (8,8,8) | BOTH BYTE-EXACT FIRST DIFF — h=1 mode composes with curved laws, no new rules. |
+| 3594 | C3 opener-wrap probe (flat widening 13->15 cols) | x8.5-9.5 y9.5-21.5 h2 + x10.5-11.5 y8.5-22.5 h2 | (8,8,8) | val-0xff markers LEGAL; mkband edge 28->4 (<=26:6); pad maxnc15 -4 nx-independent. BYTE-EXACT. Reg=85. |
+| 3646/3648 | NC15/NC17 nx3 diamonds (curved big-nc pad) | x8.5-10.5; NC15 ncs 11/15/11 y8.5-22.5 h2-5; NC17 ncs 13/17/13 y8.5-24.5 h2-5 | (8,8,8) | Pads 214/212. First read "cyclic band" (WRONG — single-point slope degeneracy). Both BYTE-EXACT after slope-10 fix. |
+| 3653 | WNC15 run [13,13,15,15,15,13,13] | x8.5-14.5, y per plane (9.5/8.5 starts), h2-5 dome profiles | (8,8,8) | RUN GRAMMAR at width>=13 CONFIRMED (markers identical). Pad 174 -> nc15 = 244-10nx SLOPE -10 (with 3646). BYTE-EXACT. |
+| 3657 | WNC15B shoulders [11,11,13,13,15,15,15,13,13,11,11] | x8.5-18.5 (as-built: x9/x17 cols7-9 h3 variance) | (8,8,8) | 11<->13 transition CONFIRMED. Pad 136 -> CURVED KINK fires nx>=10 even nx<maxnc. BYTE-EXACT (as-built). |
+| 3691 | WWIDE [7,11,11,7] widening probe | x8.5-11.5, nc7 y12.5-18.5 / nc11 y10.5-20.5, h2-4 | (8,8,8) | +4 WIDENING OPENER CORRECT. Pad 204 -> maxnc11 curved = slope-10 base246 (13h re-confirms +kink). BYTE-EXACT. |
+| 3693 | WWIDE3 [3,7,11,7,3] nc3-tip probe | x8.5-12.5, nc3 y14.5-16.5 h2 tips | (8,8,8) | BYTE-EXACT first diff — nc3 tip + 3->7 widening + yp6 lead all correct. Dome content 100% proven. |
+| 3696 | FULL-DOME nc15 donor (= Deployment 15d shape) | x8.5-22.5, 15 planes nc[3,7,11,11,13,13,15,15,15,13,13,11,11,7,3], 161 cols (x20.5 y14-16 h3 build variance) | (8,8,8) | THE CLOSER: pad 102 -> CURVED KINK = 2*q^2 QUADRATIC (q=(nx-5)//5; 4-point fit 0/0/+2/+8). mc CONFIRMED (mat 32). BYTE-EXACT. Reg=93. |
+| 3700 | FULL-DOME nc15 CORRECTED (plane-12 slip fixed to intended h4) | same as 3696, x20.5 y14.5-16.5 now h4 | (8,8,8) | **BYTE-EXACT to our generation** -> scan fully proven. 1-byte blueprint diff vs our 3697 exposed the _scan_mc 0xff-opener bug (mc 513 vs 544). |
+| (3702) | Deployment 15d import | nc15 dome x8.5-22.5 | (8,8,8) | ★ **RENDERED PERFECTLY — nc15 curved dome deploy-proven.** |
+| (3703/3704) | Deployment 15a / 15 imports (nc17 mt2/h1) | nc17 dome x8.5-24.5 | (8,8,8) | Both invalid-vertex WITH correct mc -> genuine nc17 gap (base 242 single-point). WNC17 donor requested. |
+| 3707 | WNC17 run [15,15,17,17,17,15,15] | x8.5-14.5, h2-6, y-starts 10.5/10.5/9.5x3/10.5/10.5 | (8,8,8) | b2 FLAT-TOP GATE (curved identical planes keep b2=2; item 13) + nc17 pad 242-10nx+2*idrun. BYTE-EXACT. |
+| 3712 | FULL 15a donor (nx17 maxnc17 dome, 213 cols) | x9.5-25.5, 17 planes nc[3,9,11,13,15,15,15,17,17,17,15,15,15,13,11,9,3], h3-edge planes x15.5/x19.5 | (8,8,8) | ONE-BYTE diff -> SHADOW-rule gate = MAX-TOP not Tlast (h3-edge plane doesn't shadow). BYTE-EXACT. Reg=95. |
+| 3718 | H1-RIM donor (= 3712 with 20 rim cols at h1) | x9.5-25.5 nc17 dome, h1 tips/edges | (8,8,8) | MARKER-GAP LAW refined: band sum = effnc(LEFT plane, h1 cols EXCLUDED) + full nc(RIGHT). BYTE-EXACT first fix. Reg=96. |
+| (3714/3715-era imports) | Deployments 15d/15a/15 final | nc15+nc17 domes mt2+h1 | (8,8,8) | ★★★ ALL THREE RENDERED — big-nc curved family + h=1 rims DEPLOY-PROVEN end-to-end. |
+| 3723/3725 | NC16 diamond (nx3) + WNC16 run (nx7, no identical planes) | x8.5-10.5 [12,16,12] / x8.5-14.5 [14,14,16,16,16,14,14] | (8,8,8) | nc16 pad = 242-10nx +2 STEP at nx>=5 — same cell as nc17; WNC16 (no id-runs) KILLS the idrun reading. Both BYTE-EXACT (diamond first-diff). Reg=99. |
+| 3728/3730 | NC13 diamond + WNC13 run (nc12-14 verification bracket) | x8.5-10.5 [9,13,9] / x8.5-14.5 [11,11,13,13,13,11,11] | (8,8,8) | Legacy slope-9 (235-9nx) VERIFIED at nx3+nx7 (208/172) — nc12-14 branch REAL. WNC13 mc=767 (hidden 0xff mat) end-to-end. Both BYTE-EXACT first diff. Reg=101. |
+| 3734-3744 | P6A-F nx6 pocket sweep (x0 11/14/24 x z 8/20) | nx6 nc4 h4 boxes | (8,8,8) | x0 11/24 CLEAN (reg); x0 14: grp+2@z8, LEAD+2&pad+2@z20 (lead z-dependence = NEW); x0 19 grp+2@z20. Hooks = lead short-step cells xp%5==1, attenuating. Reg=105. |
+| 3746-3756 | Y12-Y23 nx4 lead-y sweep | nx4 nc4 h4 boxes y12-23 | (8,8,8) | THREE laws: lead y-term 7-PERIOD at nx<=4 (2*((yp+1)//7)); grp_off = mat + max(lead7,lead9) - 9 (DECOUPLES from lead); pad y-band = %7 in {4,5} not %15 (aliased). nx3 sweep 3520-3534 RECLAIMED (8 donors). Reg=119. |
+| 3758/3760/3762 | NC9/NC10 diamonds + WNC10 run (item 8) | nx3 [7,9,7]/[8,10,8]; nx7 [8,8,10,10,10,8,8] (as-built x14=x13 variance) | (8,8,8) | Curved nc9/10 = 244-10nx +2@nx>=5 +2*((nx-5)//4)^2 (old 239-9nx = nx7/nx9 degeneracy). BONUS: shadow gate WIDER-previous clause (ncp(L-1)>ncp(L)). Reg=122. |
+| 3764/3766/3768 | C49/C315/C20 item-9 cell fluke-guards | (4,9) far coords / (3,15) x20y10z18 / nx20 flat slab | (8,8,8) | C49+C20 BYTE-EXACT (cells confirmed). C315 -2 -> spawned probe grid. |
+| 3770-3780 | C315 1-var + pairwise probes | flat nx3 nc15 h3 at x/y/z single+pairs | (8,8,8) | Single axes CLEAN; x20*y10 -> grp+2 (3776); *z18 -> +pad-2 (3766). New off-origin small-nx hook pocket -> GUARDED. |
+| (3768 LOD) | C20 extent-20 LOD set | — | — | ITEM 10 SOLVED: h4 phantom = POSITION lov%32<8 (not extent>16); mass-scan 283 exports nested-consistent; M1/C20 verified. Reg=130. |
+| 3786/3784 | G11/G24 gband-edge probes (FIRST asymmetric +1-col widenings) | nx2: [5|6] / [12|13] flat-band+curved | (8,8,8) | FIVE laws: 35*INT-mean F (all F sites; even-sum donors were aliased); ncg(interior)=span of LOWER-ylo plane; +X wider-last=own-pair; pad nx2 -2; gband edges confirmed. |
+| (3481) | NCV6 RECLAIMED (item 17) | nc[1,3,3,3,5] widest-last, ys (11,10,10,10,9) | (8,8,8) | Byte 740 = +X wider-last own-pair with Tlast_OWN. BYTE-EXACT after G-laws + own-T. Items 11+17 CLOSED. Reg=133. |

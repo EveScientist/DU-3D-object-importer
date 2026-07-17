@@ -536,8 +536,13 @@ def compute_lod_set(voxels, cx=8, cy=8, cz=8):
             v = list(sl.values())
             if len(v) > 1 and all(s == v[0] for s in v): return True
         return False
-    h6_full = (mn >= 4) or (mx >= 6) or not (solid or horiz_prism())
-    ax5 = [(1, 2) if e >= 2 else (2,) for e in (ex, ey, ez)]
+    mid = sorted((ex, ey, ez))[1]
+    # 2026-07-15 rebanded (18 donors, see obj_pipeline._h6_full): FULL iff mn>=4 / mx>=6 / (mx<=4 and mid>=4)
+    h6_full = (mn >= 4) or (mx >= 6) or (mx <= 4 and mid >= 4)
+    lo5 = (min(xs), min(ys), min(zs))
+    # h5 phantom POSITION-based (2026-07-15): low phantom iff shape occupies the chunk's
+    # low half on that axis (local voxel<16) and extent>=2 (see obj_pipeline.compute_lod_set_mc)
+    ax5 = [(1, 2) if len(voxels) > 1 and (l % 32) < 16 else (2,) for e, l in zip((ex, ey, ez), lo5)]
     want = {(3, cx, cy, cz), (4, cx//2, cy//2, cz//2), (7, 0, 0, 0)}
     for a in ax5[0]:
         for b in ax5[1]:

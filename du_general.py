@@ -68,12 +68,27 @@ def _tok(v,r): return bytes([v&0xff,1,r&0xff,0x7e,0x7e,0x7e,r&0xff,0])
 def _enc(d): return (int(round(d))+126)&0xff
 
 def bnd_op_law(x,y,z): return (65 - 55*(x-8) + 35*(y-8) + (z-8)) % 256
-_LEAD_XBASE=[0,10,19,28,38,48,57,67,76]   # cells 2,5,6,7 interpolated (~9.56/vox), rest donor-pinned
-def lead_law(x,y):
+def lead_law(x,y,_nx=None):
+    # x-contribution = 9.6/vox staircase: +10 per vox with a -2 short-step every 5 (the +8
+    # step). CLOSED FORM xt = 10*xp - 2*ceil(xp/5), pinned by the x0=16..21 consecutive sweep
+    # (3502/3504/3506/3497/3414/3416) + 3408/3410/3412/3178/3493 = 11 points, all exact except
+    # x0=9,10 (xp1,2) where the first short-step is delayed (+2 low-edge correction). Replaces
+    # the old 86*(xp//9)+_LEAD_XBASE table whose interpolated cell2 mispredicted x0=19 by 2.
     xp=x-8
-    xt=86*(xp//9)+_LEAD_XBASE[xp%9]
+    xt=10*xp - 2*((xp+4)//5)                    # (xp+4)//5 == ceil(xp/5) for the staircase
+    if xp in (1,2): xt+=2                       # x0=9/10: first short-step lands one vox later
     yp=y-8
-    yt=2*((yp+4)//9) if yp>=0 else 2*(yp//9)   # +4 shift for positives (3189c1/3420)
+    # y-contribution is NX-DEPENDENT (Y12-Y23 sweep 3746-3756, 2026-07-16):
+    #   nx<=4: yt = 2*((yp+1)//7)   (7-period, steps at yp 6/13/20...; nx3 sweep 3520-3534
+    #          was NOT contaminated -- it measured this same 7-period law)
+    #   nx>=8: yt = 2*((yp+4)//9)   (9-period, steps at yp 5/14; 3500 y13, 3508 y24)
+    #   nx 5-7: BOUNDARY UNKNOWN (both laws agree on every probed point so far: 3510 nx5
+    #          yp10, WWIDE3 nx5 yp6, DOMER3 nx7 yp8 all in agreement zones) -- flagged in
+    #          in_confidence_region at the disagreement rows. Negative branch (yseam) kept
+    #          (3187/3380).
+    if yp<0: yt=2*(yp//9)
+    elif _nx is not None and _nx<=4: yt=2*((yp+1)//7)
+    else: yt=2*((yp+4)//9)
     if x<8 and yt!=0: yt+=2                    # xseam chunks (3380 corner/9-chunk)
     return 99 + xt + yt
 def mc_law(carry_cols, xopen_owner=None, yopen_owner=None):
@@ -97,7 +112,7 @@ def mc_law(carry_cols, xopen_owner=None, yopen_owner=None):
     m8=int(112 + 55*(nx-4) - 35*(ncm-4) - (Tl-12) + 55*(x0-8) - 35*(y0-8))%256
     return 512+m8
 
-def _mkband(s): return 8 if s<=12 else (6 if s<=28 else (4 if s<=42 else 2))
+def _mkband(s): return 8 if s<=12 else (6 if s<=26 else (4 if s<=42 else 2))  # 28->4 (C3 3594; 26->6 pinned by B12)
 def _gband(s):  return 8 if s<=10 else (6 if s<=24 else (4 if s<=40 else 2))  # group bands sit LOWER than marker bands (3189/3191 groups: 26->4, 42->2, 40->4)
 
 def _planes_of(cols):
@@ -137,6 +152,45 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
             if cl: GIV[c]=cl
     else:
         GIV=IV
+    # WINDOW columns (PW1 3550): a z-gap whose empty band is FILLED by a horizontal neighbour
+    # = a void punched through a solid wall. Unlike an OPEN overhang (deck sticks out), DU
+    # encodes it as the FULL-height wall + one compact void token per void surface. The group
+    # phase treats window cols as their FULL merged span (no per-deck overhang tokens); WVOID
+    # holds the empty bands for void-token emission.
+    # Detection is REGION-based (MW3 3563: the MIDDLE col of a wide window has no solid
+    # neighbour, so a per-column test fails): flood gap-cells across adjacent columns with
+    # overlapping bands; the region is a WINDOW-void iff no member band pokes ABOVE a present
+    # neighbour's top (open air = OVH shelf). Absent neighbours = the pierced faces (fine).
+    _gapcells={}
+    for (x,y),iv in IV.items():
+        for k in range(1,len(iv)):
+            _gapcells.setdefault((x,y),[]).append((iv[k-1][1]+1, iv[k][0]-1))
+    WVOID={}
+    _seen=set()
+    for cell0,bands in _gapcells.items():
+        for b0 in bands:
+            if (cell0,b0) in _seen: continue
+            region=[(cell0,b0)]; _seen.add((cell0,b0)); stack=[(cell0,b0)]
+            open_=False
+            while stack:
+                ((x,y),(lo,hi))=stack.pop()
+                for nx,ny in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)):
+                    niv=IV.get((nx,ny))
+                    if niv is None: continue                  # pierced face
+                    if hi>niv[-1][1]: open_=True              # band above nbr top = open air
+                    for nb in _gapcells.get((nx,ny),()):
+                        if nb[0]<=hi and nb[1]>=lo and ((nx,ny),nb) not in _seen:
+                            _seen.add(((nx,ny),nb)); region.append(((nx,ny),nb)); stack.append(((nx,ny),nb))
+            if not open_:
+                for cell,b in region: WVOID.setdefault(cell,[]).append(b)
+    for cell in WVOID: WVOID[cell].sort()
+    def _win_exposed(xL,xR,y):
+        """void band EXPOSED at this x grid line: exactly one of (xL,y),(xR,y) is a window col
+        (vertical window face). Returns (lo,hi) or None. When BOTH are windows (interior grid
+        line) -> None -> natural overhang encodes the sill/lintel horizontal surfaces."""
+        vl,vr=WVOID.get((xL,y)),WVOID.get((xR,y))
+        if bool(vl)!=bool(vr): return (vl or vr)[0]
+        return None
     AV=IV
     def ivs(x,y): return AV.get((x,y))
     def h(x,y):
@@ -182,20 +236,35 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     # b2=2); edge-touching runs don't (3189c1).
     pdat=[tuple((y,IV[(planes[p][0],y)]) for y in mycols(p)) for p in range(m1)]
     csets=[frozenset(mycols(p)) for p in range(m1)]
-    b2=2; s=0
+    def _ftop(p):
+        hs={IV[(planes[p][0],y)][-1][1] for y in mycols(p)}
+        return len(hs)==1
+    b2=2; s=0; _idrun=False
     for e in range(1,m1+1):
         if e==m1 or pdat[e]!=pdat[s]:
             if (e-s)>=2 and s>0 and e<m1 and \
                len(csets[s-1])<len(csets[s]) and len(csets[e])<len(csets[s]):
-                b2=max(b2,e-s)
+                _idrun=True
+                # b2 counts the run ONLY for FLAT-TOP planes (OCC3 [3,(5,5,5),3] h4 -> 3).
+                # Identical CURVED planes (varying tops) keep b2=2 -- WNC17 3707: run of 3
+                # identical nc17 dome planes, donor b2=2 everywhere. (Backlog item 13 pinned.)
+                if _ftop(s): b2=max(b2,e-s)
             s=e
 
     # ---- markers ----
+    def _yspan(p):
+        """y-SPAN of plane p = max-min+1 of its present cols, i.e. INCLUDING interior holes.
+        Position math counts the hole column (tube donor 3536: opener _F uses span not
+        present-count -> the hole plane counts as its full width)."""
+        ys=mycols(p); return ys[-1]-ys[0]+1
     def _F(p):
         """marker-opener F of plane index p (interior; p-1 may be a phantom plane)."""
         x=planes[p][0]; ys=mycols(p); xp=planes[p-1][0]; ysp=mycols(p-1)
         z0=zl(x,ys[0]); z0=-1 if z0 is None else z0
-        return (35*(len(ysp)+len(ys)))//2 + Tlast_iv(xp,ysp[-1]) - z0
+        # 35*INTEGER-MEAN of spans (mean floored BEFORE the multiply): G11/G24 3786/3784,
+        # the first ASYMMETRIC (+1-col) widenings -- odd span sums split the two readings
+        # (symmetric donors all had even sums where (35*s)//2 == 35*(s//2)).
+        return 35*((_yspan(p-1)+_yspan(p))//2) + Tlast_iv(xp,ysp[-1]) - z0
     def _seam_marker_op():
         x=planes[0][0]; ys=mycols(0)
         return bnd_op_law(x, ys[0], zl(x,ys[0]))
@@ -212,7 +281,8 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
         for c in range(1,len(ys)):
             pv=ivs(x,ys[c-1])[-1]      # continuation runs from prev col's TOPMOST interval
             hp=pv[1]-pv[0]+1
-            out+=_marker((34-hp+(zl(x,ys[c])-pv[0]))%256, h(x,ys[c]), b2)
+            gap=ys[c]-ys[c-1]-1        # absent interior y-cols crossed (hole): +35 each (3536)
+            out+=_marker((34-hp+(zl(x,ys[c])-pv[0])+35*gap)%256, h(x,ys[c]), b2)
             for ig,hu,_,_ in extras(x,ys[c]): out+=_marker((ig-1)%256,hu,b2)
         mplanes.append(out)
     AV=GIV   # group phase reads group intervals
@@ -237,7 +307,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
         if flat:
             if ncp(R)<ncp(L):
                 if ncp(L)==maxnc:   # descending off the full-width plane: max-K variant
-                    F=35*ncp(L) + Tlast(L) - zfirst(R)
+                    F=35*_yspan(L) + Tlast(L) - zfirst(R)
                 else:               # deeper descent: shifted pair = marker-F(L)
                     F=_F(L)
             elif vol(L)==vol(R):
@@ -248,11 +318,24 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 # Tlast(L)=14; OVH1/2 pin that upper intervals stay OUT of the max).
                 if [ (y,ivs(planes[L][0],y)) for y in mycols(L) ] == \
                    [ (y,ivs(planes[R][0],y)) for y in mycols(R) ]:
-                    F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
+                    def _maxtop(p):
+                        return max((ivs(planes[p][0],y)[-1][1] for y in mycols(p)
+                                    if ivs(planes[p][0],y)), default=-1)
+                    if L>0 and (_maxtop(L-1)>_maxtop(L) or ncp(L-1)>ncp(L)):
+                        F=_F(L)   # identical pair IN THE SHADOW of a TALLER (maxtop: H2 3581
+                                  # h1|h1 after h2; H4 3585) OR WIDER (ncp: WNC10 3762 as-built
+                                  # nc8|nc8 pair after nc10, 1-byte diff at the junction opener)
+                                  # previous plane: shifted-pair _F(L). Gate = MAX-TOP not
+                                  # last-col Tlast: an h3-EDGE plane (15a dome x15, Tlast 11
+                                  # but maxtop EQUAL) does NOT shadow -- 3712 junction 16|17
+                                  # takes own-pair. Ascending staircases (3367 h4|h4 after h3,
+                                  # narrower-or-equal + lower) keep own-pair.
+                    else:
+                        F=35*((_yspan(L)+_yspan(R))//2) + Tlast(L) - zfirst(R)
                 else:
                     mT=max((zt(planes[q][0],y) for q in (L,R) for y in mycols(q)
                             if ivs(planes[q][0],y) is not None), default=-1)
-                    F=(35*(ncp(L)+ncp(R)))//2 + mT - zfirst(R)
+                    F=35*((_yspan(L)+_yspan(R))//2) + mT - zfirst(R)
             elif ncp(L)==ncp(R) and vol(L)>vol(R) and L>0 and not _flat_top(R):
                 # DESCENDING EQUAL-nc: shifted-pair F=_F(L) when the TARGET plane R is
                 # curved (DOMER3 G5, NCV5 G3 continuing -- both 1-byte-confirmed). When R
@@ -260,7 +343,7 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 # -> own-pair. Discriminator is R (shorter plane), not L.
                 F=_F(L)
             else:                   # ascending/equal, or descending flat-top: own-pair
-                F=(35*(ncp(L)+ncp(R)))//2 + Tlast(L) - zfirst(R)
+                F=35*((_yspan(L)+_yspan(R))//2) + Tlast(L) - zfirst(R)
         else:
             if vol(R)!=vol(L):
                 own = R if vol(R)>vol(L) else L
@@ -327,7 +410,14 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 ysm=mycols(p); ysm2=mycols(p-1)
                 Tl=Tlast_iv(x,ysm[-1]); Tp=Tlast_iv(planes[p-1][0],ysm2[-1])
                 z0g=zl(x,ysm[0]); z0g=-1 if z0g is None else z0g
-                F=(35*(len(ysm2)+len(ysm)))//2 + max(Tl,Tp) - z0g
+                _sp,_so=_yspan(p-1),_yspan(p)
+                if _so>_sp:
+                    # +X boundary with WIDER last plane = FULLY own-pair: 35*span_own +
+                    # Tlast_OWN (not max with prev -- NCV6 3481 byte 740, the original
+                    # item-17 residual; G11/G24 pinned the span half, T aliased there).
+                    F=35*_so + Tl - z0g
+                else:
+                    F=35*((_sp+_so)//2) + max(Tl,Tp) - z0g   # 35*INT-mean; span incl holes (3538)
                 op=(199-F)%256
             cstart=1
             if sm:  # y-seam: FLAT seam -> merged opener+first-transition token (val+35,
@@ -406,25 +496,60 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
         elif g==g0 and xseam_lo:  # x-seam entry line (S-1): interior form, opener = seam - 36
             # opener run: BOTTOM-interval height of col u0 (OVH4: 2 not span 6)
             toks=[((_seam_marker_op()-36)%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(gx,u0,zc[u0])]
-            _upwall(toks,smooth,[],colex(u0),gx,u0)            # Y-lo edge wall uppers
+            if _win_exposed(xL,xR,u0) is None:
+                _upwall(toks,smooth,[],colex(u0),gx,u0)        # Y-lo edge wall uppers (win-suppressed)
         else:
             toks=[((199-_ylo_F(g))%256, max(h(xL,u0) or 0,h(xR,u0) or 0))]; smooth=[(gx,u0,zc[u0])]
-            _upwall(toks,smooth,[],colex(u0),gx,u0)            # Y-lo edge wall uppers
+            if _win_exposed(xL,xR,u0) is None:
+                _upwall(toks,smooth,[],colex(u0),gx,u0)        # Y-lo edge wall uppers (win-suppressed)
         def pres(y): return ivs(xL,y) is not None or ivs(xR,y) is not None
+        def fpres(y): return (xL,y) in IV or (xR,y) in IV   # FOOTPRINT presence (pre z-clip):
+                                                            # distinguishes a real hole from a
+                                                            # z-clipped col (present in IV, gone
+                                                            # from GIV) -- only holes get the
+                                                            # void skip / +35 exit bump.
         def ctop(y): return cut_top(xL,y) or cut_top(xR,y)
         def cbot(y): return cut_bot(xL,y) or cut_bot(xR,y)
         for yw in range(wstart,u1+1):
             a,b=yw-1,yw
+            if not fpres(a) and not fpres(b):
+                continue        # wall between two FOOTPRINT-absent cols = interior of a >=2-wide
+                                # hole: no surface (hole gap=1 never hits this).
+            if not fpres(a) and pres(b):
+                # void-EXIT edge wall: crossing OUT of a hole into a present col.
+                # val = 33 - h + 35*(void_width-1), void_width = run of footprint-holes ending
+                # at a. Confirmed: CB 3538 (w2 -> +35), VE1 3544 (w3 -> +70), VE2 3546 (h5).
+                hb=max(h(xL,b) or 0, h(xR,b) or 0)
+                vw=0; k=a
+                while k>=u0-3 and not fpres(k): vw+=1; k-=1
+                toks.append(((33-hb+35*(vw-1))%256, hb)); smooth.append((gx,yw,zc[b]))
+                _upwall(toks,smooth,colex(a),colex(b),gx,yw)
+                continue
             ea=(ivs(xL,a) is not None)!=(ivs(xR,a) is not None)
             eb=(ivs(xL,b) is not None)!=(ivs(xR,b) is not None)
             hp2=t.get(a-1,0); bs=bsf(a,b,a-1,a)
             bval=(33-max(t[a],hp2)+bs)%256
-            if ea or eb or not pres(a) or not pres(b):
+            wcol=None
+            # h=1 MODE (H1/H2/H3 3579/3581/3583): a wall touching ANY h=1 column emits the
+            # single edge-form (bval, rr) -- no B/T pair (an h=1 col has no separate top
+            # surface; T = h-2 would be invalid). Marker/opener/boundary/close laws unchanged.
+            h1wall=any(hv==1 for hv in (h(xL,a),h(xR,a),h(xL,b),h(xR,b)) if hv>0)
+            if h1wall or ea or eb or not pres(a) or not pres(b):
                 # edge wall incl group-absent columns (z-clipped away: ZC2c2 (33,3));
                 # RUN = max BOTTOM-interval height (P3 3404: val keeps full span 33-8,
                 # run stays 3), not the span
                 rr=max(h(xL,a),h(xR,a),h(xL,b),h(xR,b))
                 toks.append((bval,rr)); smooth.append((gx,yw,min(x for x in (zc[a],zc[b]) if x is not None)))
+                if h1wall:
+                    # h=1 deck (3548 1-thick shell): single-form (ig-2, h_up) ONLY when the
+                    # upper deck exists on ALL FOUR corners of the wall (wall fully interior
+                    # to the ceiling sheet); mixed walls (any corner solid/deckless) absorb
+                    # it into the single token. First layer only (no multi-layer h=1 donor).
+                    es=[extras(xL,a),extras(xL,b),extras(xR,a),extras(xR,b)]
+                    if all(es):
+                        ig=min(e[0][0] for e in es); hu=max(e[0][1] for e in es)
+                        toks.append(((ig-2)%256,hu)); smooth.append((gx,yw,min(e[0][2] for e in es)))
+                    continue        # no generic _upwall in h=1 mode
             else:
                 # B/T are SURFACE tokens (ZC1/ZC2): B exists unless both cols lack a real
                 # bottom (cut_bot); T exists unless both lack a real top (cut_top).
@@ -434,12 +559,36 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                     zloc=[z for z in (zl(xL,a),zl(xL,b),zl(xR,a),zl(xR,b)) if z is not None]
                     bv = 33 if (ctop(a) and pres(a-1) and ctop(a-1)) else bval
                     toks.append((bv,max(zloc)-min(zloc))); smooth.append((gx,yw,min(zloc)))
-                if not (ctop(a) and ctop(b)):
+                # exposed window/cavity face: X-direction (one x-side is a window col: PW1
+                # windows) OR Y-direction (one y-col of the wall is a window col: SC2 3569
+                # sealed-cavity y-faces). The chain law is DIRECTION-SYMMETRIC.
+                wv = _win_exposed(xL,xR,a) or _win_exposed(xL,xR,b)
+                if wv is not None:
+                    yy=a if _win_exposed(xL,xR,a) is not None else b
+                    wcol=(xL,yy) if WVOID.get((xL,yy)) else (xR,yy)
+                else:
+                    awin=WVOID.get((xL,a)) or WVOID.get((xR,a))
+                    bwin=WVOID.get((xL,b)) or WVOID.get((xR,b))
+                    if bool(awin)!=bool(bwin):
+                        yy=b if bwin else a
+                        wcol=(xL,yy) if WVOID.get((xL,yy)) else (xR,yy)
+                if wcol is not None:
+                    # T replaced by a CHAIN over the window col's intervals -- (h_k - 2,
+                    # void_h above interval k), last (h_last-2, 0). Values pinned by MW4' 3565
+                    # (4-thick sill/lintel -> val 2) + MW2' 3561 (stacked chain); SC2 3569
+                    # pins the Y-face case ((0,3),(0,0) at the cavity's y-walls).
+                    ivw=IV[wcol]
+                    for k,(a1,b1) in enumerate(ivw):
+                        run=(ivw[k+1][0]-b1-1) if k<len(ivw)-1 else 0
+                        toks.append((((b1-a1+1)-2)%256, run))
+                        smooth.append((gx,yw,b1+1 if k<len(ivw)-1 else None))
+                elif not (ctop(a) and ctop(b)):
                     ztc=[z for z in (zt(xL,a),zt(xL,b),zt(xR,a),zt(xR,b)) if z is not None]
                     hc =[v for v in (h(xL,a),h(xL,b),h(xR,a),h(xR,b)) if v>0]
                     tv = 33 if (cbot(a) and cbot(b)) else (min(hc)-2)%256
                     toks.append((tv,max(ztc)-min(ztc))); smooth.append((gx,yw,min(ztc)))
-            _upwall(toks,smooth,colex(a),colex(b),gx,yw)       # this wall's upper deck(s)
+            if wcol is None:
+                _upwall(toks,smooth,colex(a),colex(b),gx,yw)   # wall's deck (suppressed at exposed face)
         if not ph:
             a,b=u1,u1+1
             if ctop(u1) and pres(u1-1) and ctop(u1-1):
@@ -448,7 +597,8 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
                 val=(33-max(t[a],t.get(a-1,0))+bsf(a,b,a-1,a))%256
             toks.append((val, max(h(xL,u1) or 0,h(xR,u1) or 0)))
             smooth.append((gx,u1+1,zc[u1]))
-            _upwall(toks,smooth,colex(u1),[],gx,b)             # Y-hi edge wall uppers
+            if _win_exposed(xL,xR,u1) is None:
+                _upwall(toks,smooth,colex(u1),[],gx,b)         # Y-hi edge wall uppers (win-suppressed)
         return toks,smooth
 
     glines=list(range(g0,g1+1))
@@ -480,34 +630,101 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     nx=m1
     # per-pair gap bands (sum of adjacent plane col counts)
     mncs=[len(mycols(p)) for p in range(m1)]
-    mkgaps=[_mkband(mncs[i]+mncs[i+1]) for i in range(nx-1)]
+    # marker gap band sum = EFFECTIVE nc of the LEFT plane (h1 columns excluded) + FULL nc of
+    # the RIGHT plane. Pinned by H1-rim donor 3718 (nc17 dome, h1 rim): descending 15|13 gap
+    # is 6 (effL 13+13=26) not 4 (28), while ascending 13|15 stays 4 (13+15=28, right's h1
+    # edges count in full); all 16 gaps fit incl the all-h1 tip (effL 0+9=9 -> 8).
+    _effncs=[sum(1 for y in mycols(p) if h(planes[p][0],y)!=1) for p in range(m1)]
+    mkgaps=[_mkband(_effncs[i]+mncs[i+1]) for i in range(nx-1)]
     def ncg(g):
+        # group gap-band col count = y-SPAN of the line's col-set (incl holes), not present
+        # count -- so a hole doesn't shrink the count and inflate the gap band (VE1 3544).
         if (g==0 and not xseam_lo) or (g==nP and not xopen_hi):
             p=0 if g==0 else nP-1
-            return len(mycols(p))
+            return _yspan(p)
         cl={y for y in mycols(g-1)} if 0<=g-1<m1 else set()
         cr={y for y in mycols(g)} if 0<=g<m1 else set()
+        if cl and cr:
+            # interior line count = span of the plane with the LOWER ylo (tie -> LEFT), NOT
+            # the union span. Pinned by the gap-band table: G11 3786 [5|6] gaps (8,6) + G24
+            # 3784 [12|13] gaps (6,4) (equal ylo -> spanL) vs NC15dia 3646 [11,15,11] (4,4,4)
+            # + NC13dia 3728 [9,13,9] (6,4,6) (R extends LOW -> spanR). Union was aliased on
+            # every symmetric donor and dies on G24 gap0 (25->4 != 6).
+            sl=max(cl)-min(cl)+1; sr=max(cr)-min(cr)+1
+            return sr if min(cr)<min(cl) else sl
         u=cl|cr
-        return len(u) if u else max(len(mycols(p)) for p in range(m1))
+        return (max(u)-min(u)+1) if u else max(_yspan(p) for p in range(m1))
     gncs=[ncg(g) for g in glines]
     ggaps=[_gband(gncs[i]+gncs[i+1]) for i in range(len(glines)-1)]
     # pads
     if maxnc==5: pad=240-8*nx if nx<=3 else 246-10*nx
-    elif 7<=maxnc<=11:
-        # slope-9 band (nc7-11); base drops 2 every 2 nc: nc7/8=241, nc9/10=239, nc11=237.
-        # DOMER4 (nx9,nc9): 239-81=158 confirmed. nc10/11 bases EXTRAPOLATED (need donors).
-        pad=({7:241,8:241,9:239,10:239,11:237}[maxnc])-9*nx
-    else: pad=246-10*nx        # nc4,6,12,16 (B12/B16) all on this line
-    if nx>=20: pad+=6                     # provisional kink (3191 nx20: pad 52; 3189 nx13/14 classic; nx15-19 unseen)
-    if (nx,maxnc)==(3,15): pad-=4         # measured cell (P13 3424); lines beyond unseen
+    elif maxnc==11 and len({iv[-1][1] for iv in IV.values()})>1:
+        # CURVED nc11 = slope-10 base 246 (SAME family as the maxnc>=12 band -- the old
+        # "slope-9 band" was a single-point misfit). 2 donors: WWIDE 3691 nx4 (246-40 -2 yband
+        # =204) + 13h nx11 deploy (246-110 +2 kink =138). Kink fires via _curved_hi below.
+        pad=246-10*nx
+    elif maxnc in (9,10) and len({iv[-1][1] for iv in IV.values()})>1:
+        # CURVED nc9/10 (item 8, 2026-07-16): base 244 slope-10, step +2 @ nx>=5, plus a
+        # 2*((nx-5)//4)^2 staircase. FOUR points: NC9/NC10 diamonds 3758/3760 nx3=214;
+        # WNC10 3762 nx7=176; DOMER4/13g nx9=158. The old 239-9nx fit was the nx7/nx9
+        # DEGENERACY (both models agree there; only nx3 splits them -> 214 not 212).
+        # Staircase divisor 4 here vs 5 at nc15-17: the kink landscape is per-maxnc.
+        pad=244-10*nx+((2 if nx>=5 else 0)+2*((nx-5)//4)**2 if nx>=5 else 0)
+    elif 9<=maxnc<=11:
+        # slope-9 row now serves FLAT-top maxnc 9-11 only (flat box 3422 (4,9): 239-36+1=204).
+        pad=({9:239,10:239,11:237}[maxnc])-9*nx
+    elif maxnc in (7,8) and len(set(mncs))>1:
+        # CURVED nc7/8 (varying col-set: DOMER3/NCV3 nc7): slope-9 base 241. FLAT nc7/8 boxes
+        # fall through to the -10 default line -- pinned by flat box 3493 chunk9 (nx10,nc8 ->
+        # 146, NOT slope-9's 151; the two coincide only at nx5 where the dome nc7/8 donors sat).
+        pad=241-9*nx
+    elif maxnc>=12 and len({iv[-1][1] for iv in IV.values()})>1 and nx<20:
+        # CURVED (varying column TOPS -- NOT varying nc: C3 3594 flat-top widening steps sit on
+        # the else-line) big-nc band. 2026-07-15 CORRECTION: the "cyclic slope-9" was a MISFIT
+        # from single nx3 points (a lone nx3 pad can't tell slope-9/base-241 from slope-10/
+        # base-244; both give 214). The TWO-POINT same-family same-x0 pair NC15 3646 (nx3:214)
+        # + WNC15 run 3653 (nx7:174) pins nc15 = 244-10*nx EXACTLY (slope -10). nc17 diamond
+        # 3648 (nx3:212) fits slope-10 base 242 -- SLOPE UNVERIFIED (one point; needs an nx7
+        # nc17 donor). nc12/13/14/16/18 have NO byte donor -> provisional else-line-2*((nc-13)//2)
+        # placeholder, FLAGGED. See [[project-probe-backlog]] items 2/3.
+        if maxnc==15: pad=244-10*nx                          # PROVEN (2 donors)
+        elif maxnc in (16,17):
+            # base 242 with a +2 STEP at nx>=5: nx3 diamonds 3648/3723 = 212 (no step);
+            # nx7 runs 3707/3725 = 174 (+2 -- WNC16 has NO identical planes, killing the
+            # earlier idrun reading). Step threshold nx>=5 UNBRACKETED (nx4-6 unprobed).
+            # nc15 has NO step (WNC15 nx7 = 244-70 exact). 3712 nx17: 242-170+2+8kink=80.
+            pad=242-10*nx+(2 if nx>=5 else 0)
+        else: pad=(246-2*max(0,(maxnc-11)//2))-10*nx         # provisional placeholder, unverified
+    else: pad=246-10*nx        # nc4,6,12,16 + FLAT nc7/8 (B12/B16) all on this line
+    _curved_hi = (maxnc>=11 and len({iv[-1][1] for iv in IV.values()})>1 and nx<20)
+    if nx>=10 and (( nx>=maxnc and (len(set(mncs))==1 or nx>=20) ) or _curved_hi) \
+       and not (xseam_lo or xopen_hi or yseam_lo is not None
+                or yopen_hi is not None or zseam_lo or zopen_hi):
+        # SINGLE-chunk pad kink, period-5 staircase in q=(nx-5)//5. TWO shapes:
+        #   FLAT   footprint (nx>=maxnc): +2*q   LINEAR  (SC5 3575 nx10 +2; 3191 nx20 +6)
+        #   CURVED band (_curved_hi):     +2*q^2 QUADRATIC -- pinned by 4 points: nx3/nx7 +0
+        #     (NC15 3646/WNC15 3653), nx11 +2 (WNC15B 3657), nx15 +8 (FULL-DOME donor 3696;
+        #     killed both linear guesses +4/+2 -> Deployments 3659/3694). nx20 curved
+        #     EXTRAPOLATED (2*9=18?) -- no donor; 3191's +6 is the FLAT family.
+        # SEAM chunks skip (3493c9 classic).
+        _q=(nx-5)//5
+        pad += 2*_q*_q if _curved_hi else 2*_q
+    if maxnc==15 and len({iv[-1][1] for iv in IV.values()})==1:
+        pad-=4                            # maxnc15 FLAT-TOP cell ((3,15) 3424 + (4,15) C3 3594);
+                                          # curved nc15 sits on the cyclic band (NC15 3646)
     if (nx,maxnc)==(4,9): pad+=1          # flat box 3422 sits +1 above the 239-9nx line
                                           # (curved DOMER4 nx9 is exact); unreconciled, 1 cell
     # nx4 y-band: pad -2 at y0' in {4,19,-10} i.e. (y0-8)%15 in (4,5) (3418/3187c1/3187c2;
     # y' 0/9/10 unaffected (3162/3420/3217), nx6 at y27 unaffected (3380c1)). Empirical;
     # smells like phase alignment -- revisit with more y-cells.
-    if nx<=4 and (mycols(0)[0]-8)%15 in (4,5): pad-=2   # 3400c1 extends to nx3; nx6 exempt (3380c1)
+    if nx==2: pad-=2   # nx2 cell: G11 3786 (maxnc6 flat-band) AND G24 3784 (maxnc13 curved)
+                       # both -2 -- first nx2 donors ever; 2 shapes, one position (provisional)
+    if nx<=4 and (mycols(0)[0]-8)%7 in (4,5): pad-=2
+    # ^ small-nx pad y-band is %7 (yp 4,5,11,12,19...), NOT the old %15 (aliased: donors sat
+    #   at yp 4,5,19 where both agree; 3532/3534 yp11,12 pinned mod-7). Same 7-period as the
+    #   nx<=4 lead y-term. nx6 exempt (3380c1 y27).
     if lead is None:
-        lead=lead_law(planes[0][0], mycols(0)[0])
+        lead=lead_law(planes[0][0], mycols(0)[0], _nx=nx)
     markerspan=sum(len(m) for m in mplanes)+sum(mkgaps)
     # premat = pad - (lead-99), exact on every donor incl 3380c1's 0; when the formula
     # goes NEGATIVE it lands at 4 (X3 3382 mid: -8 -> 4; single point, provisional --
@@ -515,10 +732,21 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     premat=pad-(lead-99)
     if premat<0: premat=4
     mat_off=lead+markerspan+premat
-    grp_off=mat_off+lead-9
+    # grp_off's lead-like term DECOUPLES from the actual lead at small nx: Y13 3748 (nx4 yp5:
+    # lead=99 7-period but grp at mat+101-9 = 9-period) vs Y21 3752 (nx4 yp13: grp follows the
+    # LARGER 7-period lead 103). Rule = max of the two period laws' leads (they only diverge
+    # for nx<=4 at the disagreement rows).
+    _gl=lead
+    if nx<=4:
+        _gl=max(lead, lead_law(planes[0][0], mycols(0)[0], _nx=None))
+    grp_off=mat_off+_gl-9
     if xseam_lo: grp_off+=10               # hook (3178c2); NOT stacked with yseam (3380 corner)
     elif yseam_lo is not None: grp_off+=2  # hook (3187c2)
     if xseam_lo and yopen_hi is not None: grp_off-=2   # hook (3380 chunk (9,8,8))
+    # NOTE: single-chunk donor 3497 (nx6 maxnc4, y8, z20) needs grp_off +2, but donors 3508
+    # (nx8) & 3510 (nx5) are resid 0 -> the max(0,nx-maxnc) hypothesis is DEAD (not gap-based).
+    # 3497's +2 is confounded (nx6 vs z20 vs combo -- C/D varied too many axes); isolation
+    # donors E/F pending. Left OUT until a clean single-variable donor pins it.
     grpspan=sum(len(g) for g in gregs)+sum(ggaps)
     trailing=premat
     scanlen=grp_off+grpspan+trailing
@@ -539,6 +767,9 @@ def build_scan_general(cols, mc, bnd_op=None, lead=None, smooth_fn=None,
     if prev<scanlen: fill(prev,scanlen,last is not None and last%2==0)
     return bytes(S)
 
+LAST_MC={}   # per-chunk mc of the most recent build_multichunk (mat byte can be bg-valued
+             # 0x00/0xff and thus UNRECOVERABLE from scan bytes -- consumers fall back here)
+
 def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
     """Split GLOBAL cols (construct-local voxel coords, chunk0 covers 0..31 per axis) at
     32-voxel chunk boundaries in X, Y and Z -> {(cx,cy,cz): scan}. mc: int, or dict keyed
@@ -548,6 +779,7 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
     plane/col at S+1 for group math (open/uncapped high side); a chunk whose shape
     continues below carries from S-2 (negative local coords) with seam entry forms
     (Z: markers from S-2, group region clips at S-1 inside build_scan_general)."""
+    LAST_MC.clear()
     IV=_norm(cols)
     xs=[x for x,_ in IV]; ys=[y for _,y in IV]
     zs=[v for iv in IV.values() for ab in iv for v in ab]
@@ -608,6 +840,7 @@ def build_multichunk(cols, mc=None, chunk0=(8,8,8), smooth_fn=None):
                                 yopen_owner=(ys_hi and not ys_lo))
             else:
                 m = mc[key] if isinstance(mc,dict) else mc
+            LAST_MC[key]=m
             # smooth_fn is defined over GLOBAL coords; chunks work in local coords, so
             # wrap with the chunk offset (field stays continuous across seams)
             sf=None
