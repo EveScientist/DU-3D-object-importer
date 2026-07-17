@@ -228,17 +228,27 @@ TEMPLATE_M = '/home/du/exports/archive/3187_export.blueprint'
 
 def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=True,
                         material=None, size='M', core_type='static',
-                        record_template=TEMPLATE_M):
+                        record_template=TEMPLATE_M, allow_unverified_size=False):
     """From-scratch blueprint via the SEMANTIC emitter (du_semantic). Every voxel body is
     generated whole (h3 = real cells; h4-h7 = EMPTY -- DU regenerates LODs client-side).
-    The Model/Elements envelope is SYNTHESIZED for the chosen core `size` (XS..XXXXXL) and
-    `core_type` (static/dynamic/space) via du_envelope -- no core-size template lock. The
-    per-record JSON skeleton (created_at/metadata/meta record) is cloned from record_template
-    (core-size-independent; DU recomputes meta on import -- Deployment 16 proved stale meta
-    renders). voxels in construct-local coords (chunk0 (8,8,8) covers 0..31). smooth_fn(
-    x,y,z)->target point maps to per-vertex positions (84 steps/vox, clamp +/-100)."""
+    The Model/Elements envelope is synthesized via du_envelope. The per-record JSON skeleton
+    is cloned from record_template (core-size-independent; DU recomputes meta on import).
+    voxels in construct-local coords (chunk0 (8,8,8)). smooth_fn(x,y,z)->target maps to
+    per-vertex positions (84 steps/vox, clamp +/-100).
+
+    CORE SIZE: only 'M' is DEPLOY-VERIFIED. compute_lod_set_mc hardwires the M-core octree
+    (chunk0=8, levels h3..h7) -- the ONLY layout we have donors for. A different Model.Size
+    with that octree makes DU panic 'wrong cell' on import (dep18, 2026-07-17). Other sizes
+    need the per-core octree layout derived from blueprint.rs + one in-game deploy each;
+    until then they raise unless allow_unverified_size=True (for those deploy tests)."""
     import json, copy
     import du_semantic, du_envelope
+    if size.upper() != 'M' and not allow_unverified_size:
+        raise ValueError(
+            f"core size {size!r} is NOT deploy-verified: compute_lod_set_mc emits the M-core "
+            f"octree (chunk0=8, h3..h7), which panics DU under a non-128 Model.Size. Only 'M' "
+            f"is proven. Pass allow_unverified_size=True to build a deploy TEST for another "
+            f"size (expect to iterate on the octree layout).")
     OFF = 256    # local coord 0 == absolute cell 256 (chunk key * 32)
     vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
     safe, reasons = du_semantic.semantic_confidence(voxels)
