@@ -223,37 +223,44 @@ def _scan_mc(scan):
                          "use du_general.LAST_MC from the build")
     return 512+P['mat']
 
-def build_blueprint_sem(template_path, out_path, voxels, name, smooth_fn=None,
-                        yseam_payload=True, material=None):
-    """From-scratch blueprint via the SEMANTIC emitter (du_semantic, 2026-07-18): every
-    record body generated whole (header+streams+mapping) -- no scans, no mc recovery, no
-    template LOD body. h3 = real cells; h4-h7 = EMPTY cells (DU regenerates LODs from h3
-    client-side -- deploy-proven since Deployment 13). voxels in construct-local coords
-    (chunk0 (8,8,8) covers 0..31). smooth_fn(x,y,z)->target point (local coords) maps to
-    per-vertex-cell positions (84 steps/voxel, clamp +/-100 as deploy-proven)."""
+TEMPLATE_M = '/home/du/exports/archive/3187_export.blueprint'
+
+
+def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=True,
+                        material=None, size='M', core_type='static',
+                        record_template=TEMPLATE_M):
+    """From-scratch blueprint via the SEMANTIC emitter (du_semantic). Every voxel body is
+    generated whole (h3 = real cells; h4-h7 = EMPTY -- DU regenerates LODs client-side).
+    The Model/Elements envelope is SYNTHESIZED for the chosen core `size` (XS..XXXXXL) and
+    `core_type` (static/dynamic/space) via du_envelope -- no core-size template lock. The
+    per-record JSON skeleton (created_at/metadata/meta record) is cloned from record_template
+    (core-size-independent; DU recomputes meta on import -- Deployment 16 proved stale meta
+    renders). voxels in construct-local coords (chunk0 (8,8,8) covers 0..31). smooth_fn(
+    x,y,z)->target point maps to per-vertex positions (84 steps/vox, clamp +/-100)."""
     import json, copy
-    import du_semantic
+    import du_semantic, du_envelope
     OFF = 256    # local coord 0 == absolute cell 256 (chunk key * 32)
     vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
-    # SEMANTIC confidence: geometry-only (the du_general layout pockets are gone -- the
-    # emitter has no per-shape arithmetic to mis-fire). Flags only donor-unverified
-    # GEOMETRY classes (curved multi-axis corners).
     safe, reasons = du_semantic.semantic_confidence(voxels)
     for r in reasons:
         print(f"[validate] WARNING: {r} -- deploy at own risk / verify with a donor")
+    # core-fit check: shape must sit inside the core's voxel volume
+    csz = du_envelope.core_voxel_size(size)
+    hi = max(max(v) for v in voxels) if voxels else 0
+    if hi >= csz:
+        raise ValueError(f"shape extent {hi+1} exceeds {size} core voxel size {csz} -- "
+                         f"scale down or pick a larger core / tile across cores")
     pos_fn = None
     if smooth_fn is not None:
         def pos_fn(p):
-            P = (p[0] - OFF, p[1] - OFF, p[2] - OFF)
-            T = smooth_fn(*P)
-            d = [max(-100, min(100, round(84 * (T[i] - P[i])))) for i in range(3)]
+            Pl = (p[0] - OFF, p[1] - OFF, p[2] - OFF)
+            T = smooth_fn(*Pl)
+            d = [max(-100, min(100, round(84 * (T[i] - Pl[i])))) for i in range(3)]
             if d == [0, 0, 0]:
                 return None
             return (126 + d[0], 126 + d[1], 126 + d[2])
     mat = material or du_semantic.MAT_HCCARBON
-    bp = json.load(open(template_path))
-    out = copy.deepcopy(bp)
-    proto = copy.deepcopy(out['VoxelData'][0])
+    proto = copy.deepcopy(json.load(open(record_template))['VoxelData'][0])
     want = compute_lod_set_mc(voxels)
     entries = []
     for (h, x, y, z) in sorted(want):
@@ -272,8 +279,7 @@ def build_blueprint_sem(template_path, out_path, voxels, name, smooth_fn=None,
         e['records']['voxel']['data']['$binary'] = b64
         e['records']['voxel']['hash']['$numberLong'] = hsh
         entries.append(e)
-    out['VoxelData'] = entries
-    out['Model']['Name'] = name
+    out = du_envelope.build_envelope(entries, size=size, core_type=core_type, name=name)
     json.dump(out, open(out_path, 'w'))
     return want
 

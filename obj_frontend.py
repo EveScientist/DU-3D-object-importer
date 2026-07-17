@@ -1,58 +1,76 @@
 """obj_frontend.py -- .obj mesh -> DU blueprint, on the SEMANTIC pipeline (2026-07-18).
 
-The full front-to-back path: load a triangle mesh, voxelize its surface, fill to a solid,
-place it at the core origin, and emit a blueprint via obj_pipeline.build_blueprint_sem
-(du_semantic core -- no empirical grammar). This is what the web UI at
+Full path: load a triangle mesh, voxelize its surface, fill to a solid, place it in the
+chosen core, and emit a blueprint via obj_pipeline.build_blueprint_sem (du_semantic core,
+no empirical grammar; du_envelope for arbitrary core sizes). This is what the web UI at
 objtodu.evescientist.net calls.
 
     from obj_frontend import obj_to_blueprint
-    obj_to_blueprint('ship.obj', 'ship.blueprint', grid=48, name='Ship')
+    obj_to_blueprint('ship.obj', 'ship.blueprint', size='L', fill_fraction=0.9)
+
+The voxelizer (obj_to_du_voxels.voxelize, surface SAT) is intentionally SWAPPABLE -- pass
+your own voxelize_fn(verts, faces, grid)->set to try a different algorithm.
 """
-import numpy as np
-
-from obj_to_du_voxels import load_obj, fit_to_grid, voxelize
+from obj_to_du_voxels import load_obj, fit_to_grid, voxelize as _default_voxelize
 import obj_pipeline as P
-
-# Default template = a real game export whose Model skeleton + one VoxelData prototype we
-# clone (only the voxel bodies are replaced). Any h3-bearing export works; 3187 is an M core.
-DEFAULT_TEMPLATE = '/home/du/exports/archive/3187_export.blueprint'
+import du_envelope as E
 
 # Core build volume starts at voxel 8 (the (8,8,8) chunk-0 origin in construct-local coords).
 CORE_ORIGIN = 8
 
 
-def voxelize_obj(obj_path, grid=48, margin=2, fill='z'):
+def voxelize_obj(obj_path, size='M', fill_fraction=0.9, fill='z', margin=None,
+                 grid=None, voxelize_fn=None):
     """.obj -> solid voxel set in construct-local coords (min corner at CORE_ORIGIN).
-    fill: 'z' (span per column, z-convex shapes) or 'parity' (even-odd, handles hollows)
-    or 'none' (surface only). grid = voxel resolution of the longest mesh axis."""
+
+    size           core size name (XS..XXXXXL); sets the voxel resolution unless `grid`.
+    fill_fraction  fraction of the core edge the longest mesh axis fills (0<f<=1) --
+                   this is the SCALING control the user picks.
+    grid           override: absolute voxel resolution of the longest mesh axis.
+    fill           'z' (span per column), 'parity' (even-odd, hollows), 'none' (surface).
+    voxelize_fn    optional custom voxelizer(verts, faces, grid)->set of (x,y,z).
+    """
+    core_vox = E.core_voxel_size(size)
+    if grid is None:
+        grid = max(1, int(round(core_vox * fill_fraction)))
+    if grid > core_vox:
+        raise ValueError(f"grid {grid} exceeds {size} core voxel size {core_vox}")
+    if margin is None:
+        margin = max(1, (core_vox - grid) // 2)   # centre the shape in the core
     verts, faces = load_obj(obj_path)
-    verts, _ = fit_to_grid(verts, grid, margin)
-    surf = voxelize(verts, faces, grid)
-    if not surf:
+    # fit into a `grid`-sized cube (the mesh's own bounding box maps to [margin, grid-margin])
+    verts, _ = fit_to_grid(verts, grid, margin=0)
+    vox = (voxelize_fn or _default_voxelize)(verts, faces, grid)
+    if not vox:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
     if fill == 'z':
-        solid = P.solid_fill_z(surf)
+        solid = P.solid_fill_z(vox)
     elif fill == 'parity':
-        solid = P.solid_fill_parity(surf)
+        solid = P.solid_fill_parity(vox)
     elif fill == 'none':
-        solid = surf
+        solid = vox
     else:
         raise ValueError(f'unknown fill mode {fill!r}')
-    # translate so the shape's min corner sits at the core origin (all axes)
+    # translate so the shape's min corner sits at CORE_ORIGIN, centred within the core
     lo = [min(v[i] for v in solid) for i in range(3)]
-    d = tuple(CORE_ORIGIN - lo[i] for i in range(3))
+    ex = [max(v[i] for v in solid) - lo[i] + 1 for i in range(3)]
+    d = tuple(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i]
+              for i in range(3))
     return {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in solid}
 
 
-def obj_to_blueprint(obj_path, out_path, grid=48, margin=2, fill='z', name=None,
-                     template=DEFAULT_TEMPLATE, material=None, smooth_fn=None):
-    """Full pipeline: .obj file -> .blueprint file. Returns (voxel_count, lod_record_set)."""
-    voxels = voxelize_obj(obj_path, grid=grid, margin=margin, fill=fill)
+def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
+                     fill='z', grid=None, name=None, material=None, smooth_fn=None,
+                     voxelize_fn=None):
+    """Full pipeline: .obj file -> .blueprint file for a chosen core size.
+    Returns (voxel_count, lod_record_set)."""
+    voxels = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction, fill=fill,
+                          grid=grid, voxelize_fn=voxelize_fn)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
-    want = P.build_blueprint_sem(template, out_path, voxels, name,
-                                 smooth_fn=smooth_fn, material=material)
+    want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn,
+                                 material=material, size=size, core_type=core_type)
     return len(voxels), want
 
 
@@ -61,18 +79,18 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description='Convert an .obj mesh to a DU blueprint.')
     ap.add_argument('obj')
     ap.add_argument('out')
-    ap.add_argument('--grid', type=int, default=48, help='voxel resolution (default 48)')
-    ap.add_argument('--margin', type=int, default=2)
+    ap.add_argument('--size', default='M', choices=list(E.CORE_SIZES),
+                    help='core size (default M)')
+    ap.add_argument('--type', dest='core_type', default='static',
+                    choices=list(E.CORE_KIND), help='core type (default static)')
+    ap.add_argument('--fill-fraction', type=float, default=0.9,
+                    help='fraction of the core the mesh fills (0<f<=1, default 0.9)')
+    ap.add_argument('--grid', type=int, default=None, help='absolute voxel resolution override')
     ap.add_argument('--fill', choices=('z', 'parity', 'none'), default='z')
     ap.add_argument('--name', default=None)
-    ap.add_argument('--material', default=None, help='material short name (default hcCarbon)')
     args = ap.parse_args()
-    mat = None
-    if args.material:
-        # look the short name up against the known palette (extend as needed)
-        import du_semantic
-        if args.material.strip() == du_semantic.MAT_HCCARBON[1]:
-            mat = du_semantic.MAT_HCCARBON
-    n, want = obj_to_blueprint(args.obj, args.out, grid=args.grid, margin=args.margin,
-                               fill=args.fill, name=args.name, material=mat)
-    print(f'{args.obj} -> {args.out}: {n} voxels, {len(want)} records')
+    n, want = obj_to_blueprint(args.obj, args.out, size=args.size, core_type=args.core_type,
+                               fill_fraction=args.fill_fraction, grid=args.grid,
+                               fill=args.fill, name=args.name)
+    print(f'{args.obj} -> {args.out}: {n} voxels, {len(want)} records, {args.size} '
+          f'{args.core_type} core')
