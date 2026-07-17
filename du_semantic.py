@@ -236,3 +236,29 @@ def build_chunks(voxels, material=MAT_HCCARBON, pos_fn=None, mapping=None, mat_i
                           pos_fn=pos_fn, mapping=mapping, mat_idx=mat_idx,
                           yseam_payload=yseam_payload)
             for k in sorted(keys)}
+
+
+def semantic_confidence(voxels):
+    """Geometry-only confidence check for the SEMANTIC emitter (voxels = local coords,
+    chunk0 covers 0..31). Returns (safe, reasons[]). The du_general layout pockets
+    (nc pad bands, nx6, off-origin, period leads) DO NOT APPLY here -- the emitter has
+    no per-shape arithmetic. The only donor-unverified regions are GEOMETRY classes the
+    surface-corner + phantom-copy + Y-payload rules have never been checked against a
+    game export:
+      * a curved shape crossing TWO OR MORE chunk axes at once (curved corner): the
+        Y-seam payload is only donor-proven on a lone Y crossing; corner payload
+        interaction is unprobed. (Blocky corners ARE proven: 3380.)
+      * per-x variation in a Y-seam payload neighborhood (donors are x-uniform there).
+    Flat/single-axis/single-chunk shapes of any size and column height are geometrically
+    routine -- NOT flagged."""
+    reasons = []
+    xs = [v[0] for v in voxels]; ys = [v[1] for v in voxels]; zs = [v[2] for v in voxels]
+    cross = [min(a) // 32 != max(a) // 32 for a in (xs, ys, zs)]
+    tops = {}
+    for (x, y, z) in voxels:
+        tops[(x, y)] = max(tops.get((x, y), z), z)
+    curved = len({t for t in tops.values()}) > 1
+    if curved and sum(cross) >= 2:
+        reasons.append("curved shape crossing >=2 chunk axes (curved corner): Y-seam "
+                       "payload interaction at a corner is donor-unverified")
+    return (not reasons), reasons

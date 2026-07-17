@@ -232,17 +232,15 @@ def build_blueprint_sem(template_path, out_path, voxels, name, smooth_fn=None,
     (chunk0 (8,8,8) covers 0..31). smooth_fn(x,y,z)->target point (local coords) maps to
     per-vertex-cell positions (84 steps/voxel, clamp +/-100 as deploy-proven)."""
     import json, copy
-    import du_semantic, du_validate
+    import du_semantic
     OFF = 256    # local coord 0 == absolute cell 256 (chunk key * 32)
     vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
-    cols = to_columns(voxels)
-    xs = [x for x, _ in cols]; ys = [y for _, y in cols]
-    safe, reason = du_validate.in_confidence_region(
-        cols,
-        xseam_lo=(min(xs) // 32 != max(xs) // 32),
-        yseam=(min(ys) // 32 != max(ys) // 32))
-    if not safe:
-        print(f"[validate] WARNING: {reason} -- deploy at own risk / verify with a donor")
+    # SEMANTIC confidence: geometry-only (the du_general layout pockets are gone -- the
+    # emitter has no per-shape arithmetic to mis-fire). Flags only donor-unverified
+    # GEOMETRY classes (curved multi-axis corners).
+    safe, reasons = du_semantic.semantic_confidence(voxels)
+    for r in reasons:
+        print(f"[validate] WARNING: {r} -- deploy at own risk / verify with a donor")
     pos_fn = None
     if smooth_fn is not None:
         def pos_fn(p):
