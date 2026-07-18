@@ -167,6 +167,19 @@ def core_octree_params(size):
     return core_h, chunk0, chunk0 * 32
 
 
+def octree_from_cells(cells, core_h):
+    """MINIMAL valid octree {(h,x,y,z)} from ABSOLUTE material cells: every non-empty leaf
+    chunk (cell//32) plus all ancestors up to the single root h(core_h). This is placement-
+    agnostic -- it reads where the content actually is, so it tracks any centering/tiling
+    offset (unlike compute_lod_set_octree which assumes the fixed chunk0 origin)."""
+    leaves = {tuple(c[i] // 32 for i in range(3)) for c in cells}
+    want = {(3,) + c for c in leaves}
+    for L in range(4, core_h + 1):
+        shift = L - 3
+        want |= {(L,) + tuple(c[i] >> shift for i in range(3)) for c in leaves}
+    return want
+
+
 def compute_lod_set_octree(voxels, size, chunk0=None):
     """MINIMAL valid octree {(h,x,y,z)} for a core size: every non-empty leaf chunk (h3)
     plus ALL its ancestors up to the single root h(CoreSize.height()). No phantom neighbours
@@ -310,11 +323,11 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             return (126 + d[0], 126 + d[1], 126 + d[2])
     mat = material or du_semantic.MAT_HCCARBON
     proto = copy.deepcopy(json.load(open(record_template))['VoxelData'][0])
-    # MINIMAL octree for every core size -- deploy-proven S/M/L 2026-07-18 (dep20/20b/20c):
-    # DU regenerates LOD content from h3, so the phantom low-neighbour nodes are NOT needed.
-    # (compute_lod_set_mc + its phantom position-rules survive only for byte-exact donor
-    # reproduction in the reg suite, not for generation.)
-    want = compute_lod_set_octree(voxels, size)
+    # MINIMAL octree derived from the ACTUAL PLACED cells (vox_abs), so the h3 records land on
+    # the chunks that really hold the content -- must track the centering/`place` offset, NOT
+    # a fixed chunk0 (mismatch = empty meshes, dep23). Non-empty leaves + all ancestors to the
+    # single root h(core_h); DU regenerates LOD content from h3 (phantoms unneeded).
+    want = octree_from_cells(vox_abs, core_h)
     entries = []
     for (h, x, y, z) in sorted(want):
         e = copy.deepcopy(proto)
