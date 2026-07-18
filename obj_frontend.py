@@ -43,7 +43,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
         print(f"[obj] grid {grid} capped to {max_grid} for performance "
               f"(pass max_grid= to raise; fills {100*max_grid//core_vox}% of the {size} core)")
         grid = max_grid
-    verts, faces = VX.load_obj(obj_path)
+    verts, faces = VX.load_mesh(obj_path)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness)
@@ -149,7 +149,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
                     voxels=n, note=f'mesh scaled into {size} core')
 
     # auto / tile: voxelize once at the requested absolute resolution, in a neutral grid
-    verts, faces = VX.load_obj(obj_path)
+    verts, faces = VX.load_mesh(obj_path)
     grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth)

@@ -63,11 +63,12 @@ def preview():
     """Return the VOXELIZED + smoothed result as a surface mesh (flat vertex/tri arrays) so
     the browser can show what DU will actually build. Voxelized at a capped grid for speed."""
     up = request.files.get('mesh')
-    if up is None or up.filename == '' or not up.filename.lower().endswith('.obj'):
-        return jsonify(error='Upload a .obj mesh file.'), 400
+    if up is None or up.filename == '' or not up.filename.lower().endswith(('.obj','.stl','.ply','.gltf','.glb')):
+        return jsonify(error='Upload a .obj / .stl / .ply / .gltf / .glb mesh.'), 400
     o = _opts(request.form)
     token = uuid.uuid4().hex[:8]
-    obj_path = os.path.join(WORKDIR, f'{token}_pv.obj')
+    _ext = os.path.splitext(up.filename)[1].lower()
+    obj_path = os.path.join(WORKDIR, f'{token}_pv{_ext}')
     up.save(obj_path)
     try:
         pv_grid = min(o['max_grid'], 64)                 # cap: fast, light preview
@@ -93,8 +94,8 @@ def convert():
     up = request.files.get('mesh')
     if up is None or up.filename == '':
         return jsonify(error='No .obj file uploaded.'), 400
-    if not up.filename.lower().endswith('.obj'):
-        return jsonify(error='Please upload a .obj mesh file.'), 400
+    if not up.filename.lower().endswith(('.obj', '.stl', '.ply', '.gltf', '.glb')):
+        return jsonify(error='Upload a .obj / .stl / .ply / .gltf / .glb mesh.'), 400
 
     o = _opts(request.form)
     size, core_type, mode = o['size'], o['core_type'], o['mode']
@@ -103,7 +104,8 @@ def convert():
 
     stem = os.path.splitext(os.path.basename(up.filename))[0][:40] or 'model'
     token = uuid.uuid4().hex[:8]
-    obj_path = os.path.join(WORKDIR, f'{token}.obj')
+    _ext = os.path.splitext(up.filename)[1].lower()
+    obj_path = os.path.join(WORKDIR, f'{token}{_ext}')
     out_path = os.path.join(WORKDIR, f'{token}.blueprint')
     up.save(obj_path)
 

@@ -42,6 +42,239 @@ def load_obj(path):
     return np.asarray(verts, np.float64), np.asarray(faces, np.int32)
 
 
+def _triangulate(poly):
+    """Fan-triangulate a polygon (list of vertex indices) -> list of index triples."""
+    return [[poly[0], poly[i], poly[i + 1]] for i in range(1, len(poly) - 1)]
+
+
+def load_stl(path):
+    """STL (binary or ASCII) -> (verts, faces). Binary is parsed with a numpy record dtype."""
+    with open(path, 'rb') as f:
+        data = f.read()
+    if len(data) >= 84:
+        ntri = int.from_bytes(data[80:84], 'little')
+        if len(data) == 84 + 50 * ntri and ntri > 0:            # binary STL
+            dt = np.dtype([('n', '<f4', 3), ('v', '<f4', (3, 3)), ('a', '<u2')])
+            arr = np.frombuffer(data, dtype=dt, count=ntri, offset=84)
+            verts = arr['v'].reshape(-1, 3).astype(np.float64)
+            faces = np.arange(3 * ntri, dtype=np.int32).reshape(-1, 3)
+            return verts, faces
+    verts, faces, cur = [], [], []                              # ASCII STL
+    for line in data.decode('utf-8', 'replace').splitlines():
+        p = line.split()
+        if len(p) >= 4 and p[0] == 'vertex':
+            cur.append([float(p[1]), float(p[2]), float(p[3])])
+            if len(cur) == 3:
+                i = len(verts); verts += cur; faces.append([i, i + 1, i + 2]); cur = []
+    if not faces:
+        raise ValueError(f'{path}: no triangles found in STL')
+    return np.asarray(verts, np.float64), np.asarray(faces, np.int32)
+
+
+_PLY_T = {'char': '<i1', 'uchar': '<u1', 'int8': '<i1', 'uint8': '<u1',
+          'short': '<i2', 'ushort': '<u2', 'int16': '<i2', 'uint16': '<u2',
+          'int': '<i4', 'uint': '<u4', 'int32': '<i4', 'uint32': '<u4',
+          'float': '<f4', 'float32': '<f4', 'double': '<f8', 'float64': '<f8'}
+
+
+def load_ply(path):
+    """PLY (ascii / binary little- or big-endian) -> (verts, faces). Reads x,y,z + the face
+    vertex-index list, skipping any other properties (normals, colours, ...)."""
+    with open(path, 'rb') as f:
+        raw = f.read()
+    he = raw.find(b'end_header')
+    if he < 0:
+        raise ValueError(f'{path}: not a PLY (no end_header)')
+    nl = raw.find(b'\n', he)
+    header = raw[:he].decode('ascii', 'replace')
+    body = raw[nl + 1:]
+    fmt = 'ascii'; elements = []          # [(name, count, [(kind, ...)])]
+    for line in header.splitlines():
+        t = line.split()
+        if not t:
+            continue
+        if t[0] == 'format':
+            fmt = t[1]
+        elif t[0] == 'element':
+            elements.append([t[1], int(t[2]), []])
+        elif t[0] == 'property' and elements:
+            if t[1] == 'list':
+                elements[-1][2].append(('list', t[2], t[3], t[4]))
+            else:
+                elements[-1][2].append(('scalar', t[1], t[2]))
+
+    verts = []; faces = []
+    if fmt == 'ascii':
+        toks = body.split()
+        pos = 0
+        for name, count, props in elements:
+            for _ in range(count):
+                if name == 'vertex':
+                    vals = {}
+                    for pr in props:
+                        v = toks[pos]; pos += 1
+                        vals[pr[2] if pr[0] == 'scalar' else pr[3]] = v
+                    verts.append([float(vals['x']), float(vals['y']), float(vals['z'])])
+                elif name == 'face':
+                    for pr in props:
+                        if pr[0] == 'list':
+                            n = int(toks[pos]); pos += 1
+                            poly = [int(toks[pos + k]) for k in range(n)]; pos += n
+                            faces += _triangulate(poly)
+                        else:
+                            pos += 1
+                else:
+                    pos += sum(1 for _ in props)     # skip other elements' scalars (approx)
+    else:
+        endian = '<' if 'little' in fmt else '>'
+        off = 0
+        import struct as _st
+        def rd(t):
+            nonlocal off
+            d = _PLY_T[t]; sz = np.dtype(d).itemsize
+            val = np.frombuffer(body, dtype=endian + d[1:], count=1, offset=off)[0]
+            off += sz; return val
+        for name, count, props in elements:
+            for _ in range(count):
+                if name == 'vertex':
+                    vals = {}
+                    for pr in props:
+                        vals[pr[2]] = rd(pr[1])
+                    verts.append([float(vals['x']), float(vals['y']), float(vals['z'])])
+                elif name == 'face':
+                    for pr in props:
+                        if pr[0] == 'list':
+                            n = int(rd(pr[1]))
+                            poly = [int(rd(pr[2])) for _ in range(n)]
+                            faces += _triangulate(poly)
+                        else:
+                            rd(pr[1])
+                else:
+                    for pr in props:
+                        rd(pr[1]) if pr[0] == 'scalar' else None
+    if not faces:
+        raise ValueError(f'{path}: no faces in PLY')
+    return np.asarray(verts, np.float64), np.asarray(faces, np.int32)
+
+
+def _quat_mat(x, y, z, w):
+    n = (x * x + y * y + z * z + w * w) ** 0.5 or 1.0
+    x, y, z, w = x / n, y / n, z / n, w / n
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def load_gltf(path):
+    """glTF (.gltf + external/embedded buffers) or GLB (.glb) -> (verts, faces). Walks the
+    node hierarchy applying transforms, and merges every mesh primitive (TRIANGLES)."""
+    import json, base64, os, struct as _st
+    if path.lower().endswith('.glb'):
+        data = open(path, 'rb').read()
+        _, _, length = _st.unpack_from('<III', data, 0)
+        off = 12; gltf = None; buffers = [b'']
+        while off < length:
+            clen, ctype = _st.unpack_from('<II', data, off); off += 8
+            chunk = data[off:off + clen]; off += clen
+            if ctype == 0x4E4F534A:
+                gltf = json.loads(chunk)
+            elif ctype == 0x004E4942:
+                buffers = [chunk]
+    else:
+        gltf = json.load(open(path))
+        base = os.path.dirname(os.path.abspath(path))
+        buffers = []
+        for b in gltf.get('buffers', []):
+            uri = b.get('uri', '')
+            if uri.startswith('data:'):
+                buffers.append(base64.b64decode(uri.split(',', 1)[1]))
+            else:
+                buffers.append(open(os.path.join(base, uri), 'rb').read())
+
+    DT = {5120: '<i1', 5121: '<u1', 5122: '<i2', 5123: '<u2', 5125: '<u4', 5126: '<f4'}
+    NC = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}
+
+    def accessor(ai):
+        acc = gltf['accessors'][ai]; bv = gltf['bufferViews'][acc['bufferView']]
+        buf = buffers[bv.get('buffer', 0)]
+        off = bv.get('byteOffset', 0) + acc.get('byteOffset', 0)
+        nc = NC[acc['type']]; dt = DT[acc['componentType']]
+        stride = bv.get('byteStride')
+        if stride:
+            isz = np.dtype(dt).itemsize
+            out = np.empty((acc['count'], nc), np.dtype(dt))
+            for i in range(acc['count']):
+                out[i] = np.frombuffer(buf, dtype=dt, count=nc, offset=off + i * stride)
+            return out
+        return np.frombuffer(buf, dtype=dt, count=acc['count'] * nc,
+                             offset=off).reshape(acc['count'], nc)
+
+    def node_mat(node):
+        if 'matrix' in node:
+            return np.array(node['matrix'], float).reshape(4, 4).T
+        M = np.eye(4)
+        if 'scale' in node:
+            M[:3, :3] = M[:3, :3] @ np.diag(node['scale'])
+        if 'rotation' in node:
+            R = np.eye(4); R[:3, :3] = _quat_mat(*node['rotation'])
+            M = R @ M
+        if 'translation' in node:
+            T = np.eye(4); T[:3, 3] = node['translation']
+            M = T @ M
+        return M
+
+    all_v = []; all_f = []; base_i = [0]
+
+    def emit_mesh(mi, world):
+        for prim in gltf['meshes'][mi].get('primitives', []):
+            if prim.get('mode', 4) != 4 or 'POSITION' not in prim.get('attributes', {}):
+                continue
+            pos = accessor(prim['attributes']['POSITION']).astype(np.float64)
+            ph = np.concatenate([pos, np.ones((len(pos), 1))], 1) @ world.T
+            v = ph[:, :3]
+            if 'indices' in prim:
+                idx = accessor(prim['indices']).reshape(-1).astype(np.int64)
+            else:
+                idx = np.arange(len(v), dtype=np.int64)
+            f = idx.reshape(-1, 3) + base_i[0]
+            all_v.append(v); all_f.append(f); base_i[0] += len(v)
+
+    def walk(ni, parent):
+        node = gltf['nodes'][ni]
+        world = parent @ node_mat(node)
+        if 'mesh' in node:
+            emit_mesh(node['mesh'], world)
+        for ch in node.get('children', []):
+            walk(ch, world)
+
+    scenes = gltf.get('scenes'); nodes = gltf.get('nodes')
+    if scenes and nodes:
+        roots = scenes[gltf.get('scene', 0)].get('nodes', range(len(nodes)))
+        for r in roots:
+            walk(r, np.eye(4))
+    else:                                     # no scene graph: dump all meshes untransformed
+        for mi in range(len(gltf.get('meshes', []))):
+            emit_mesh(mi, np.eye(4))
+    if not all_v:
+        raise ValueError(f'{path}: no triangle meshes found in glTF')
+    return np.concatenate(all_v), np.concatenate(all_f).astype(np.int32)
+
+
+_LOADERS = {'.obj': load_obj, '.stl': load_stl, '.ply': load_ply,
+            '.gltf': load_gltf, '.glb': load_gltf}
+
+
+def load_mesh(path):
+    """Load a mesh by file extension -> (verts Nx3 float64, faces Mx3 int32).
+    Supports .obj / .stl / .ply / .gltf / .glb."""
+    import os
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in _LOADERS:
+        raise ValueError(f'unsupported mesh format {ext!r} (use .obj/.stl/.ply/.gltf/.glb)')
+    return _LOADERS[ext](path)
+
+
 def fit_to_grid(verts, grid, margin=0):
     """Uniformly scale+centre the mesh into [margin, grid-margin]^3 voxel space."""
     lo = verts.min(0)

@@ -59,7 +59,7 @@
 <body>
 <div class="wrap">
   <h1>OBJ → Dual Universe Blueprint</h1>
-  <p class="sub">Upload a <code>.obj</code> mesh and download a ready-to-import DU construct blueprint.</p>
+  <p class="sub">Upload a mesh (.obj / .stl / .ply / .gltf / .glb) and download a ready-to-import DU construct blueprint.</p>
 
   <div class="warn">
     <b>Read before using.</b> This tool fits your whole mesh into a <b>single core</b> (up to
@@ -71,15 +71,15 @@
   </div>
 
   <form id="f" class="card">
-    <label>Mesh file <span class="hint">— a manifold <code>.obj</code> gives the best result</span></label>
-    <input type="file" name="mesh" accept=".obj" required>
+    <label>Mesh file <span class="hint">— .obj / .stl / .ply / .gltf / .glb (a manifold mesh gives the best result)</span></label>
+    <input type="file" name="mesh" accept=".obj,.stl,.ply,.gltf,.glb" required>
 
     <div id="viewer" style="margin-top:12px">
       <div id="vtabs">
         <button type="button" class="vtab active" data-view="mesh">Input mesh</button>
         <button type="button" class="vtab" data-view="result" id="tabResult">DU result</button>
       </div>
-      <div id="vhint">Select a <code>.obj</code> file to preview it here — drag to orbit, scroll to zoom.</div>
+      <div id="vhint">Select a mesh (.obj / .stl / .ply / .gltf / .glb) to preview — drag to orbit, scroll to zoom.</div>
     </div>
     <div id="vmeta"></div>
 
@@ -185,6 +185,9 @@ f.addEventListener('submit', async (e) => {
 <script type="module">
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const vc = document.getElementById('viewer'), vhint = document.getElementById('vhint'),
@@ -193,7 +196,7 @@ const vc = document.getElementById('viewer'), vhint = document.getElementById('v
 const MAT = new THREE.MeshStandardMaterial({ color: 0x8fb6ff, metalness: 0.12, roughness: 0.55,
                                              side: THREE.DoubleSide, flatShading: false });
 let renderer, scene, camera, controls, group, ready = false;
-let objText = null, meshObj = null, resultObj = null, resultStale = true, view = 'mesh';
+let fileBuf = null, fileExt = '', meshObj = null, resultObj = null, resultStale = true, view = 'mesh';
 
 function init() {
   const w = vc.clientWidth, h = vc.clientHeight;
@@ -232,15 +235,34 @@ function render(obj) {
   camera.position.set(2.4, 1.7, 2.8); controls.target.set(0, 0, 0); controls.update();
 }
 
-function buildMesh() {
-  const o = new OBJLoader().parse(objText);
+function meshFromGeometry(g) {
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
+  const o = new THREE.Group(); o.add(new THREE.Mesh(g, MAT)); return o;
+}
+
+async function parseInput() {
+  const dec = new TextDecoder();
+  if (fileExt === 'obj') return new OBJLoader().parse(dec.decode(fileBuf));
+  if (fileExt === 'stl') return meshFromGeometry(new STLLoader().parse(fileBuf));
+  if (fileExt === 'ply') return meshFromGeometry(new PLYLoader().parse(fileBuf));
+  if (fileExt === 'glb' || fileExt === 'gltf') {
+    const gltf = await new Promise((res, rej) =>
+      new GLTFLoader().parse(fileBuf, '', g => res(g), e => rej(e)));
+    return gltf.scene;
+  }
+  throw new Error('Unsupported format .' + fileExt);
+}
+
+async function buildMesh() {
+  const o = await parseInput();
   let tris = 0, verts = 0;
-  o.traverse(c => { if (c.isMesh) { c.material = MAT; c.geometry.computeVertexNormals();
+  o.traverse(c => { if (c.isMesh) { c.material = MAT;
+    if (!c.geometry.getAttribute('normal')) c.geometry.computeVertexNormals();
     const g = c.geometry; verts += g.attributes.position.count;
     tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
   fit(o, 2);
   meshObj = o;
-  return `Input mesh — ${verts.toLocaleString()} vertices · ${Math.round(tris).toLocaleString()} triangles`;
+  return `Input mesh (${fileExt.toUpperCase()}) — ${verts.toLocaleString()} vertices · ${Math.round(tris).toLocaleString()} triangles`;
 }
 
 async function buildResult() {
@@ -273,10 +295,14 @@ async function showView(v) {
   if (!ready) init();
   vhint.style.display = 'none';
   if (v === 'mesh') {
-    if (!meshObj && objText) vmeta.textContent = buildMesh();
+    if (!meshObj && fileBuf) {
+      vmeta.textContent = 'Loading preview…';
+      try { vmeta.textContent = await buildMesh(); }
+      catch (e) { vmeta.textContent = 'Could not load mesh: ' + e.message; return; }
+    }
     if (meshObj) render(meshObj);
   } else {
-    if (!objText) { vmeta.textContent = 'Select a .obj first.'; return; }
+    if (!fileBuf) { vmeta.textContent = 'Select a mesh first.'; return; }
     if (resultStale || !resultObj) {
       vmeta.textContent = 'Building DU preview…';
       try { const label = await buildResult(); resultStale = false; vmeta.textContent = label; }
@@ -293,16 +319,17 @@ document.querySelectorAll('.vtab').forEach(b => b.addEventListener('click', () =
 // re-fetch the result when any build option changes
 form.querySelectorAll('select, input').forEach(el => el.addEventListener('change', () => {
   resultStale = true;
-  if (view === 'result' && objText) showView('result');
+  if (view === 'result' && fileBuf) showView('result');
 }));
 
 document.querySelector('input[name=mesh]').addEventListener('change', e => {
   const file = e.target.files[0]; if (!file) return;
   vmeta.textContent = 'Loading preview…';
+  fileExt = (file.name.split('.').pop() || '').toLowerCase();
   const r = new FileReader();
-  r.onload = () => { objText = r.result; meshObj = null; resultObj = null; resultStale = true; showView('mesh'); };
+  r.onload = () => { fileBuf = r.result; meshObj = null; resultObj = null; resultStale = true; showView('mesh'); };
   r.onerror = () => { vmeta.textContent = 'Could not read file.'; };
-  r.readAsText(file);
+  r.readAsArrayBuffer(file);
 });
 </script>
 </body>
