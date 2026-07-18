@@ -289,7 +289,7 @@ nx floor-step ((nx−1)//4−(nx−1)//5, +4 at nx=5,9,10..). Untested: nx=9/10 
   tilt dz=−(20(x+1)+4(y−10)), 15 distinct corners, 0..−56. gen_xz_from_mesh: vlist through the
   jittered/fwd-ghost z-degenerate corner chunks; −z chunks mirror +z offsets (3095 rule).
   EXPECTED: continuous plane, strong slope toward +x, gentle toward +y, deepest (+x, far-y),
-  no crack at x=0. AWAITING DEPLOY.
+  no crack at x=0. RENDERED PERFECTLY 2026-07-18.
 - **tests/mesh_yz_tilt_0704_2027.blueprint** — displaced y=0+z=0 corner (3077 shape/donor, nx=3):
   tilt dz=−(6(x−10)+20(y+1)), 12 distinct corners, 0..−58. gen_yz_from_mesh. EXPECTED:
   continuous plane, gentle toward +x, strong toward +y, deepest (far-x, +y), no crack at y=0.
@@ -331,7 +331,7 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
   seamless. LANDSCAPE ARC FULLY DONE (edges finished; 3 extreme-corner chunks deferred, low priority).**
   Edge fixes: north row ny=31 (gen_corner_middle(30) ybfs-skip), east col Rx=30 (gen_ymid_xhigh T+1),
   ny=31 flush in gen_middle_x. 61/64 structural byte-exact (25 differ only by DU's flat bevel, which
-  our displacement overwrites). AWAITING DEPLOY.
+  our displacement overwrites). RENDERED PERFECTLY 2026-07-18.
 - **tests/lens_capsule_0707.blueprint** (2026-07-07) — FIRST GENERATED CLOSED SHAPE (du_dense.py):
   4×4×4 solid carved to a lens/capsule (domed top peak +72, domed bottom −64, +6 +x tilt, flat
   sides). Plain donor recovered by zeroing 3162's displacements (no extra build). **DEPLOYED &
@@ -370,7 +370,7 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
 | 3359 | OPD2: planes [2,4,6,4],[8,8,8,8],[6,6,6,6] | x8..10 y8..11 z8+ | (8,8,8) | Equal-nc flat descent uses OWN-PAIR form. du_general 14/14. |
 | 3361 | OVH1 overhang probe: 3x3 h2 base + floating bar (gap2,h2) | base x8..10 y8..10 z8..9, bar x8..10 y9 z12..13 | (8,8,8) | Two-interval column = extra marker (val igap-1) + extra group tokens (val igap-2, run h_up) in max-window walls; column t := full span. |
 | 3363 | OVH2 overhang probe: same base, bar gap3 h3 | base x8..10 y8..10 z8..9, bar x8..10 y9 z13..15 | (8,8,8) | Pinned slopes of overhang val laws. CAVEAT: gap AND h_up co-varied -> igap-vs-h_up still confounded (needs OVH3 gap2/h3). du_general intervals: 16/16 byte-exact. |
-- **tests/deployment11_mc_ramp.blueprint** (2026-07-11) — DEPLOYMENT 11: novel X-crossing stepped ramp from build_multichunk (M3), 3178 envelope. Voxels x27..34 y8..11, z from 8, heights per X-plane: x27-28 h2 (z8-9), x29-31 h3 (z8-10), x32-34 h4 (z8-11); height step exactly at the chunk seam x32. AWAITING DEPLOY.
+- **tests/deployment11_mc_ramp.blueprint** (2026-07-11) — DEPLOYMENT 11: novel X-crossing stepped ramp from build_multichunk (M3), 3178 envelope. Voxels x27..34 y8..11, z from 8, heights per X-plane: x27-28 h2 (z8-9), x29-31 h3 (z8-10), x32-34 h4 (z8-11); height step exactly at the chunk seam x32. RENDERED PERFECTLY 2026-07-18.
 - **tests/deployment11b_mc_ramp.blueprint** (2026-07-11) — Deployment 11 RETRY. 11a (bp 3364) FAILED: 'Deserializing invalid vertex' both chunks = plateau-byte/tail mismatch (ramp plateaus give marker b2=3; du_assemble MAT_TAIL said 2 — the OCC3 3325 lesson re-hit via the multi-chunk path). du_assemble.encode_voxel_b64 now derives b2 from the scan and patches the tail per chunk. Same voxels as 11: x27..34 y8..11, h2(x27-28)/h3(x29-31)/h4(x32-34) from z8, step at seam x32. AWAITING DEPLOY. If it STILL fails: suspect the b2 plateau law itself for edge-touching plateaus (chunk2's plateau 32-34 ends at the last plane; OCC3 validated interior-only).
 - **tests/deployment11c_mc_ramp.blueprint** (2026-07-11) — Deployment 11 RETRY 2. 11b (bp 3365) failed identically (invalid vertex both chunks, voxels in build mode then client crash = OCC3 b2-over-read signature). Assembly path EXONERATED offline (rebuilt donor-3178 bodies BYTE-IDENTICAL). Root cause: b2 plateau law over-generalized — plateau counts FOOTPRINT (column-set) runs only; height plateaus don't count (all constant-footprint donors have b2=2 incl E1/stairs; OCC3's 3 was a footprint plateau). Ramp b2 now 2. Same voxels: x27..34 y8..11, h2(x27-28)/h3(x29-31)/h4(x32-34) from z8. AWAITING DEPLOY.
 | 3367 | PLT-MC donor: in-game stepped ramp = exact Deployment 11 shape | x27..34 y8..11 base z8, h2(x27-28)/h3(x29-31)/h4(x32-34) | (8,8,8)+(9,8,8) | ONE byte off per chunk vs generation -> flat vol-tie Y-lo opener = 35*mean + MAX bottom-interval col top - zfirst (owner-by-half branch was wrong; coincidental on 3252). b2=2 confirmed for height plateaus (footprint-only law). |

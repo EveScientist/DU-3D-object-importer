@@ -258,27 +258,20 @@ TEMPLATE_M = '/home/du/exports/archive/3187_export.blueprint'
 
 def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=True,
                         material=None, size='M', core_type='static',
-                        record_template=TEMPLATE_M, allow_unverified_size=False):
+                        record_template=TEMPLATE_M):
     """From-scratch blueprint via the SEMANTIC emitter (du_semantic). Every voxel body is
-    generated whole (h3 = real cells; h4-h7 = EMPTY -- DU regenerates LODs client-side).
+    generated whole (h3 = real cells; h4..hN = EMPTY -- DU regenerates LODs client-side).
     The Model/Elements envelope is synthesized via du_envelope. The per-record JSON skeleton
     is cloned from record_template (core-size-independent; DU recomputes meta on import).
-    voxels in construct-local coords (chunk0 (8,8,8)). smooth_fn(x,y,z)->target maps to
-    per-vertex positions (84 steps/vox, clamp +/-100).
+    voxels in construct-local coords. smooth_fn(x,y,z)->target maps to per-vertex positions
+    (84 steps/vox, clamp +/-100).
 
-    CORE SIZE: only 'M' is DEPLOY-VERIFIED. compute_lod_set_mc hardwires the M-core octree
-    (chunk0=8, levels h3..h7) -- the ONLY layout we have donors for. A different Model.Size
-    with that octree makes DU panic 'wrong cell' on import (dep18, 2026-07-17). Other sizes
-    need the per-core octree layout derived from blueprint.rs + one in-game deploy each;
-    until then they raise unless allow_unverified_size=True (for those deploy tests)."""
+    CORE SIZE: all sizes (XS..XXXXXL) are deploy-verified 2026-07-18 (dep20/20b/20c: S/M/L
+    boxes rendered). The octree layout per core comes from core_octree_params (levels
+    h3..CoreSize.height(), chunk0=2^(height-1), OFF=chunk0*32) + the minimal LOD set."""
     import json, copy
     import du_semantic, du_envelope
     size = size.upper()
-    if size != 'M' and not allow_unverified_size:
-        raise ValueError(
-            f"core size {size!r} is not yet deploy-verified. Only 'M' is proven in-game. "
-            f"Pass allow_unverified_size=True to build a deploy TEST for another size (uses "
-            f"the derived per-core octree from core_octree_params; verify it renders).")
     core_h, chunk0, OFF = core_octree_params(size)
     vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
     safe, reasons = du_semantic.semantic_confidence(voxels)
@@ -301,9 +294,11 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             return (126 + d[0], 126 + d[1], 126 + d[2])
     mat = material or du_semantic.MAT_HCCARBON
     proto = copy.deepcopy(json.load(open(record_template))['VoxelData'][0])
-    # M keeps the deploy-proven phantom LOD set; other sizes use the minimal octree.
-    want = (compute_lod_set_mc(voxels, chunk0=(chunk0,) * 3) if size == 'M'
-            else compute_lod_set_octree(voxels, size))
+    # MINIMAL octree for every core size -- deploy-proven S/M/L 2026-07-18 (dep20/20b/20c):
+    # DU regenerates LOD content from h3, so the phantom low-neighbour nodes are NOT needed.
+    # (compute_lod_set_mc + its phantom position-rules survive only for byte-exact donor
+    # reproduction in the reg suite, not for generation.)
+    want = compute_lod_set_octree(voxels, size)
     entries = []
     for (h, x, y, z) in sorted(want):
         e = copy.deepcopy(proto)
