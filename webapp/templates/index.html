@@ -318,9 +318,16 @@ async function showResult() {
   finally { if (mine === seq) panelOut.loading(false); }
 }
 
-// re-render the DU result when any build option changes
+// re-render the DU result when any build option changes (debounced so rapid changes
+// don't queue up expensive previews)
+let debounce = null;
 form.querySelectorAll('select, input[type=number], input[type=checkbox]').forEach(
-  el => el.addEventListener('change', () => { if (fileBuf) showResult(); }));
+  el => el.addEventListener('change', () => {
+    if (!fileBuf) return;
+    clearTimeout(debounce);
+    panelOut.loading(true);
+    debounce = setTimeout(() => showResult(), 400);
+  }));
 
 document.querySelector('input[name=mesh]').addEventListener('change', e => {
   const file = e.target.files[0]; if (!file) return;

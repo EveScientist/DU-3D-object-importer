@@ -71,8 +71,9 @@ def preview():
     obj_path = os.path.join(WORKDIR, f'{token}_pv{_ext}')
     up.save(obj_path)
     try:
-        # preview at the DOWNLOAD resolution, capped for a snappy interactive re-render.
-        pv_cap = 160
+        # preview at the DOWNLOAD resolution, capped for a snappy interactive re-render
+        # (payload/time scale with surface area; 160 made dense shapes 8MB/19s -> hung).
+        pv_cap = 96
         pv_grid = min(o['max_grid'], pv_cap)
         voxels, smooth_fn = F.voxelize_obj(
             obj_path, size=o['size'], fill_fraction=o['fill'], hollow=o['hollow'],
