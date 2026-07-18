@@ -491,3 +491,5 @@ UNKNOWN — do not byte-match blind); 2952/2954/2956 (staircases descent/peak/va
 - **tests/dep20c_box_Mmin.blueprint** (2026-07-18) — DEPLOYMENT 20c: 6^3 box, M core, MINIMAL octree (5 records: h3..h7 ancestors only, NO phantom low-neighbour LOD nodes; proven phantom-M path emits 26). Tests whether DU needs the phantom LOD nodes or regenerates from h3. KEY control for per-core-size support. AWAITING DEPLOY.
 - **tests/dep20_box_S.blueprint** (2026-07-18) — DEPLOYMENT 20: 6^3 box, S core (Size 64), minimal octree h3..h6, chunk0=4/OFF=128. Tests derived per-core octree params. AWAITING DEPLOY.
 - **tests/dep20b_box_L.blueprint** (2026-07-18) — DEPLOYMENT 20b: 6^3 box, L core (Size 256), minimal octree h3..h8, chunk0=16/OFF=512. AWAITING DEPLOY.
+
+- **tests/dep21_tile_0.blueprint + dep21_tile_1.blueprint** (2026-07-18) — DEPLOYMENT 21: multi-core TILING test. A 40x10x10 voxel bar split across 2 XS cores (tile 0 = x0..31, tile 1 = x32..39). Place tile_1 core adjacent to tile_0 core along +X (offset (1,0,0)*32 voxels). Tests that tiled constructs abut seamlessly. Both XS static, valid. AWAITING DEPLOY (verify the two halves line up into one continuous bar).

@@ -67,6 +67,102 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
     return len(voxels), want
 
 
+def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='static',
+                      resolution=None, fill_fraction=0.9, hollow=False, smooth=False,
+                      name=None, material=None):
+    """Unified entry: .obj -> one or many blueprints, by mode.
+
+      mode='scale' : scale the mesh to fit the SPECIFIED `size` core (fill_fraction). One
+                     construct -> writes <out_base>.blueprint.
+      mode='auto'  : voxelize at `resolution` (default 0.9*M) and pick the SMALLEST core
+                     that holds it. One construct.
+      mode='tile'  : voxelize at `resolution` and split across an NxNxN grid of `size`
+                     cores. Writes <out_base>_ix_iy_iz.blueprint per non-empty tile plus a
+                     manifest listing each tile's integer core offset (place adjacent
+                     in-game). Seam smoothing is per-core (constructs are independent).
+
+    Returns a manifest dict.
+    """
+    import os
+    import du_tiling as T
+    import du_envelope as E
+    if name is None:
+        name = os.path.splitext(os.path.basename(obj_path))[0]
+
+    if mode in ('scale',):
+        if size is None:
+            size = 'M'
+        n, want = obj_to_blueprint(obj_path, out_base + '.blueprint', size=size,
+                                   core_type=core_type, fill_fraction=fill_fraction,
+                                   hollow=hollow, smooth=smooth, name=name, material=material)
+        return dict(mode='scale', size=size, files=[out_base + '.blueprint'],
+                    voxels=n, note=f'mesh scaled into {size} core')
+
+    # auto / tile: voxelize once at the requested absolute resolution, in a neutral grid
+    verts, faces = VX.load_obj(obj_path)
+    grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
+    verts, _ = VX.fit_to_grid(verts, grid, margin=0)
+    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth)
+    lo = [min(v[i] for v in solid) for i in range(3)]
+    solid = {(x - lo[0], y - lo[1], z - lo[2]) for (x, y, z) in solid}
+    if smooth:
+        anchors = {(k[0] - lo[0], k[1] - lo[1], k[2] - lo[2]): v for k, v in anchors.items()}
+    extent = max(max(v[i] for v in solid) for i in range(3)) + 1
+
+    if mode == 'auto':
+        s = T.smallest_core_for(extent)
+        voxels, d = _place_in_core(solid, s)
+        sm = VX.anchor_smooth_fn(anchors, delta=d) if smooth else None
+        want = P.build_blueprint_sem(out_base + '.blueprint', voxels, name,
+                                     smooth_fn=sm, material=material, size=s, core_type=core_type)
+        return dict(mode='auto', size=s, files=[out_base + '.blueprint'],
+                    voxels=len(voxels), note=f'{extent}-vox mesh -> smallest fitting core {s}')
+
+    if mode == 'tile':
+        if size is None:
+            raise ValueError("mode 'tile' needs an explicit core size")
+        cv = E.core_voxel_size(size)
+        tiles = T.tile_voxels(solid, cv)
+        files = []; offsets = []
+        for tijk, local in sorted(tiles.items()):
+            voxels, d = _place_in_core(local, size, center=False)
+            sm = None
+            if smooth:
+                base = tuple(tijk[i] * cv for i in range(3))
+                # anchors for this tile, re-based to the tile's local frame, then placed
+                tanch = {tuple(k[i] - base[i] for i in range(3)):
+                         (tuple(v[0][i] - base[i] for i in range(3)), v[1])
+                         for k, v in anchors.items()
+                         if all(0 <= k[i] - base[i] < cv for i in range(3))}
+                sm = VX.anchor_smooth_fn(tanch, delta=d)
+            fn = f'{out_base}_{tijk[0]}_{tijk[1]}_{tijk[2]}.blueprint'
+            P.build_blueprint_sem(fn, voxels, f'{name} [{tijk[0]},{tijk[1]},{tijk[2]}]',
+                                  smooth_fn=sm, material=material, size=size, core_type=core_type)
+            files.append(fn); offsets.append(tijk)
+        return dict(mode='tile', size=size, grid=T.plan(extent, 'tile', size)['grid'],
+                    files=files, offsets=offsets,
+                    note=f'{extent}-vox mesh -> {len(files)} {size} cores; place each at its '
+                         f'core offset (x,y,z)*{cv} voxels')
+    raise ValueError(f'unknown mode {mode!r}')
+
+
+def _place_in_core(local, size, center=True):
+    """Place a shape/tile's local voxels in the core build volume. Returns (voxels, delta).
+    center=True centres the shape (single-construct default). center=False anchors the min
+    corner at 0 so full tiles fit and adjacent core constructs abut seamlessly."""
+    import du_envelope as E
+    core_vox = E.core_voxel_size(size)
+    ex = [max(v[i] for v in local) - min(v[i] for v in local) + 1 for i in range(3)]
+    lo = [min(v[i] for v in local) for i in range(3)]
+    if center:
+        import obj_pipeline as P
+        _, chunk0, _ = P.core_octree_params(size)
+        d = tuple(chunk0 + max(0, (core_vox - 2 * chunk0 - ex[i]) // 2) - lo[i] for i in range(3))
+    else:
+        d = tuple(-lo[i] for i in range(3))          # min corner -> 0; tiles abut
+    return {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in local}, d
+
+
 if __name__ == '__main__':
     import argparse
     ap = argparse.ArgumentParser(description='Convert an .obj mesh to a DU blueprint.')
@@ -81,10 +177,25 @@ if __name__ == '__main__':
     ap.add_argument('--grid', type=int, default=None, help='absolute voxel resolution override')
     ap.add_argument('--hollow', action='store_true', help='surface shell only (no solid fill)')
     ap.add_argument('--smooth', action='store_true', help='deflect vertices onto the mesh')
+    ap.add_argument('--mode', choices=('scale', 'auto', 'tile'), default='scale',
+                    help="scale: fit the --size core; auto: smallest fitting core; "
+                         "tile: split across a grid of --size cores (default scale)")
+    ap.add_argument('--resolution', type=int, default=None,
+                    help='absolute voxel resolution for auto/tile (longest axis)')
     ap.add_argument('--name', default=None)
     args = ap.parse_args()
-    n, want = obj_to_blueprint(args.obj, args.out, size=args.size, core_type=args.core_type,
-                               fill_fraction=args.fill_fraction, grid=args.grid,
-                               hollow=args.hollow, smooth=args.smooth, name=args.name)
-    print(f'{args.obj} -> {args.out}: {n} voxels, {len(want)} records, {args.size} '
-          f'{args.core_type} core')
+    if args.mode == 'scale':
+        n, want = obj_to_blueprint(args.obj, args.out, size=args.size, core_type=args.core_type,
+                                   fill_fraction=args.fill_fraction, grid=args.grid,
+                                   hollow=args.hollow, smooth=args.smooth, name=args.name)
+        print(f'{args.obj} -> {args.out}: {n} voxels, {len(want)} records, {args.size} '
+              f'{args.core_type} core')
+    else:
+        out_base = args.out[:-10] if args.out.endswith('.blueprint') else args.out
+        m = obj_to_blueprints(args.obj, out_base, mode=args.mode, size=args.size,
+                              core_type=args.core_type, resolution=args.resolution,
+                              fill_fraction=args.fill_fraction, hollow=args.hollow,
+                              smooth=args.smooth, name=args.name)
+        print(f'{args.obj} -> {m["note"]}')
+        for f in m['files']:
+            print(f'  {f}')
