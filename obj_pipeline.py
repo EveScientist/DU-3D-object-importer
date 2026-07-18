@@ -258,7 +258,7 @@ TEMPLATE_M = '/home/du/exports/archive/3187_export.blueprint'
 
 def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=True,
                         material=None, size='M', core_type='static',
-                        record_template=TEMPLATE_M):
+                        record_template=TEMPLATE_M, place=None):
     """From-scratch blueprint via the SEMANTIC emitter (du_semantic). Every voxel body is
     generated whole (h3 = real cells; h4..hN = EMPTY -- DU regenerates LODs client-side).
     The Model/Elements envelope is synthesized via du_envelope. The per-record JSON skeleton
@@ -272,21 +272,37 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     import json, copy
     import du_semantic, du_envelope
     size = size.upper()
-    core_h, chunk0, OFF = core_octree_params(size)
-    vox_abs = {(v[0] + OFF, v[1] + OFF, v[2] + OFF) for v in voxels}
+    core_h, chunk0, _ = core_octree_params(size)
+    # PLACEMENT: the core's placement element sits at world vsz/2 == cell chunk0*32 (donor
+    # 3187: element 64.125, content centred at cell 256 == chunk 8*32). So CENTRE the content
+    # bbox on chunk0*32 -- the old OFF=chunk0*32 put the content's MIN corner there, leaving
+    # its centre half-an-extent past the anchor (dep19f/dep22 deployed offset by ~half the
+    # shape). `place` overrides with an explicit per-axis cell offset (tiling: edge-align).
+    anchor = chunk0 * 32
+    if voxels:
+        lo = [min(v[i] for v in voxels) for i in range(3)]
+        hix = [max(v[i] for v in voxels) for i in range(3)]
+        if place is None:
+            OFF = tuple(anchor - (lo[i] + hix[i]) // 2 for i in range(3))
+        else:
+            OFF = tuple(place)
+    else:
+        OFF = (anchor, anchor, anchor)
+    vox_abs = {(v[0] + OFF[0], v[1] + OFF[1], v[2] + OFF[2]) for v in voxels}
     safe, reasons = du_semantic.semantic_confidence(voxels)
     for r in reasons:
         print(f"[validate] WARNING: {r} -- deploy at own risk / verify with a donor")
-    # core-fit check: shape must sit inside the core's voxel volume
-    csz = du_envelope.core_voxel_size(size)
-    hi = max(max(v) for v in voxels) if voxels else 0
-    if hi >= csz:
-        raise ValueError(f"shape extent {hi+1} exceeds {size} core voxel size {csz} -- "
-                         f"scale down or pick a larger core / tile across cores")
+    # core-fit check: content must sit inside the octree build volume (2^core_h*32 cells)
+    build_cells = (1 << (core_h - 3)) * 32
+    amax = max(max(v) for v in vox_abs) if vox_abs else 0
+    amin = min(min(v) for v in vox_abs) if vox_abs else 0
+    if amin < 0 or amax >= build_cells:
+        raise ValueError(f"placed content cells [{amin}..{amax}] fall outside the {size} core "
+                         f"build volume [0..{build_cells}) -- scale down or pick a larger core")
     pos_fn = None
     if smooth_fn is not None:
         def pos_fn(p):
-            Pl = (p[0] - OFF, p[1] - OFF, p[2] - OFF)
+            Pl = (p[0] - OFF[0], p[1] - OFF[1], p[2] - OFF[2])
             T = smooth_fn(*Pl)
             d = [max(-100, min(100, round(84 * (T[i] - Pl[i])))) for i in range(3)]
             if d == [0, 0, 0]:
@@ -316,7 +332,16 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
         e['records']['voxel']['data']['$binary'] = b64
         e['records']['voxel']['hash']['$numberLong'] = hsh
         entries.append(e)
-    out = du_envelope.build_envelope(entries, size=size, core_type=core_type, name=name)
+    # real Model.Bounds from the material-cell bbox (voxel+1), /4 world units -- DU anchors
+    # placement to these; a placeholder box (old bug) deployed the construct offset.
+    if vox_abs:
+        mnb = tuple(min(v[i] for v in vox_abs) + 1 for i in range(3))
+        mxb = tuple(max(v[i] for v in vox_abs) + 1 for i in range(3))
+        bbox = (mnb, mxb)
+    else:
+        bbox = None
+    out = du_envelope.build_envelope(entries, size=size, core_type=core_type, name=name,
+                                     bbox=bbox)
     json.dump(out, open(out_path, 'w'))
     return want
 
