@@ -89,12 +89,25 @@ def _tri_aabb_overlap(v0, v1, v2, cx, cy, cz, hs=0.5):
     return ok
 
 
-def voxelize_surface(verts, faces, grid, want_anchors=True):
+def vertex_normals(verts, faces):
+    """Area-weighted per-vertex normals (N,3), for smooth (PN-triangle) projection."""
+    vn = np.zeros_like(verts)
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]],
+                  verts[faces[:, 2]] - verts[faces[:, 0]])      # area-weighted face normals
+    for k in range(3):
+        np.add.at(vn, faces[:, k], fn)
+    ln = np.linalg.norm(vn, axis=1, keepdims=True)
+    return vn / np.where(ln < 1e-20, 1.0, ln)
+
+
+def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None):
     """Surface voxel set (SAT-exact) + optional anchor map {corner -> nearest surface pt}.
-    Numpy-batched per triangle over its candidate voxel slab."""
+    Numpy-batched per triangle over its candidate voxel slab. If `normals` (per-vertex) are
+    given, anchor targets are projected onto the smooth PN-triangle surface (rounds facets of
+    low-poly meshes) instead of the flat triangle."""
     surface = set()
     anchors = {} if want_anchors else None
-    for f in faces:
+    for fi, f in enumerate(faces):
         v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
         tri = np.stack([v0, v1, v2])
         lo = np.clip(np.floor(tri.min(0)).astype(int), 0, grid - 1)
@@ -108,7 +121,8 @@ def voxelize_surface(verts, faces, grid, want_anchors=True):
         for x, y, z in zip(ix[mask], iy[mask], iz[mask]):
             surface.add((int(x), int(y), int(z)))
         if want_anchors:
-            _accumulate_anchors(anchors, v0, v1, v2, ix[mask], iy[mask], iz[mask])
+            tn = None if normals is None else (normals[f[0]], normals[f[1]], normals[f[2]])
+            _accumulate_anchors(anchors, v0, v1, v2, ix[mask], iy[mask], iz[mask], tn)
     return surface, anchors
 
 
@@ -172,10 +186,43 @@ def _closest_on_triangle_batch(P, a, b, c):
     return out
 
 
-def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz):
+def _barycentric(Q, a, b, c):
+    """Barycentric coords (w0,w1,w2) of points Q (N,3) w.r.t. triangle a,b,c."""
+    v0 = b - a; v1 = c - a; v2 = Q - a
+    d00 = v0 @ v0; d01 = v0 @ v1; d11 = v1 @ v1
+    d20 = v2 @ v0; d21 = v2 @ v1
+    den = d00 * d11 - d01 * d01
+    den = den if abs(den) > 1e-20 else 1e-20
+    w1 = (d11 * d20 - d01 * d21) / den
+    w2 = (d00 * d21 - d01 * d20) / den
+    return 1 - w1 - w2, w1, w2
+
+
+def _pn_surface(w0, w1, w2, P1, P2, P3, N1, N2, N3):
+    """PN-triangle (Vlachos) cubic surface point at barycentric (w0,w1,w2). Rounds the flat
+    facets of a low-poly mesh toward the smooth surface implied by the vertex normals."""
+    def wij(Pi, Pj, Ni):
+        return (2 * Pi + Pj - ((Pj - Pi) @ Ni) * Ni) / 3.0
+    b210 = wij(P1, P2, N1); b120 = wij(P2, P1, N2)
+    b021 = wij(P2, P3, N2); b012 = wij(P3, P2, N3)
+    b102 = wij(P3, P1, N3); b201 = wij(P1, P3, N1)
+    E = (b210 + b120 + b021 + b012 + b102 + b201) / 6.0
+    V = (P1 + P2 + P3) / 3.0
+    b111 = E + (E - V) / 2.0
+    u, v, w = w0[:, None], w1[:, None], w2[:, None]        # u->P1, v->P2, w->P3
+    return (P1 * u**3 + P2 * v**3 + P3 * w**3
+            + 3 * b210 * u**2 * v + 3 * b120 * u * v**2
+            + 3 * b021 * v**2 * w + 3 * b012 * v * w**2
+            + 3 * b102 * w**2 * u + 3 * b201 * w * u**2
+            + 6 * b111 * u * v * w)
+
+
+def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None):
     """Keep, per voxel corner, the closest mesh point across all triangles (the smoothing
-    projection target). Vectorized: all 8 corners of every intersected voxel projected to
-    this triangle in one batch."""
+    projection target). Vectorized over all 8 corners of every intersected voxel. When tn
+    (the three vertex normals) is given, the stored target is the PN-triangle surface point
+    (smooth) rather than the flat closest point -- the nearest-triangle metric still uses the
+    flat distance."""
     if len(ix) == 0:
         return
     base = np.stack([ix, iy, iz], 1)                       # (M,3)
@@ -185,12 +232,17 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz):
     P = corners.astype(float)
     Q = _closest_on_triangle_batch(P, v0, v1, v2)
     d2 = np.einsum('ij,ij->i', Q - P, Q - P)
+    if tn is not None:
+        w0, w1, w2 = _barycentric(Q, v0, v1, v2)
+        T = _pn_surface(w0, w1, w2, v0, v1, v2, tn[0], tn[1], tn[2])
+    else:
+        T = Q
     for k in range(len(corners)):
         key = (int(corners[k, 0]), int(corners[k, 1]), int(corners[k, 2]))
         prev = anchors.get(key)
         dk = float(d2[k])
         if prev is None or dk < prev[1]:
-            anchors[key] = ((float(Q[k, 0]), float(Q[k, 1]), float(Q[k, 2])), dk)
+            anchors[key] = ((float(T[k, 0]), float(T[k, 1]), float(T[k, 2])), dk)
 
 
 def _scan_axis(verts, faces, grid, axis):
@@ -297,7 +349,8 @@ def fill_solid(surface, grid):
     return out
 
 
-def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain'):
+def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
+             smooth_normals=True):
     """Full voxelization -> (voxels, anchors).
 
     solid_mode='contain' (default): mesh-tight solid by center-in-mesh z-parity -- the
@@ -306,10 +359,15 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     solid_mode='band': conservative SAT surface + span fill -- robust to non-manifold
         meshes but the boundary sits ~1 vox proud (blockier, larger smoothing offsets).
     hollow=True: surface shell only (no interior), for hulls with a modeled outer skin.
+    smooth_normals=True: anchor targets projected onto the smooth PN-triangle surface
+        (vertex-normal Phong tessellation) so LOW-POLY meshes round out instead of showing
+        flat facets at high voxel resolution; False projects onto the flat triangles.
 
     Anchors ({surface corner -> nearest mesh point}) always come from the SAT surface pass
     so the smoothing layer has a projection target for every boundary vertex."""
-    surface, anchors = voxelize_surface(verts, faces, grid, want_anchors=want_anchors)
+    normals = vertex_normals(verts, faces) if (want_anchors and smooth_normals) else None
+    surface, anchors = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
+                                        normals=normals)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
     if hollow:
