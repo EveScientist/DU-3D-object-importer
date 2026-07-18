@@ -42,6 +42,12 @@
   .bar > i { display:block; height:100%; width:40%; background:var(--acc);
              animation:slide 1.1s ease-in-out infinite; }
   @keyframes slide { 0%{margin-left:-40%} 100%{margin-left:100%} }
+  #viewer { width:100%; height:340px; border-radius:10px; overflow:hidden;
+            background:#0b0f14; border:1px solid var(--line); position:relative; }
+  #viewer canvas { display:block; }
+  #vhint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+           color:var(--mut); font-size:14px; pointer-events:none; text-align:center; padding:0 20px; }
+  #vmeta { color:var(--mut); font-size:12.5px; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -61,6 +67,12 @@
   <form id="f" class="card">
     <label>Mesh file <span class="hint">— a manifold <code>.obj</code> gives the best result</span></label>
     <input type="file" name="mesh" accept=".obj" required>
+
+    <div id="viewer" style="margin-top:12px">
+      <div id="vhint">Select a <code>.obj</code> file to preview it here — drag to orbit, scroll to zoom.</div>
+    </div>
+    <div id="vmeta"></div>
+
 
     <div class="row">
       <div>
@@ -151,6 +163,76 @@ f.addEventListener('submit', async (e) => {
   } finally {
     go.disabled = false; bar.style.display = 'none';
   }
+});
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const vc = document.getElementById('viewer'), vhint = document.getElementById('vhint'),
+      vmeta = document.getElementById('vmeta');
+let renderer, scene, camera, controls, model, ready = false;
+
+function init() {
+  const w = vc.clientWidth, h = vc.clientHeight;
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(w, h);
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0f14);
+  camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+  camera.position.set(2.4, 1.7, 2.8);
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.8;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+  const d1 = new THREE.DirectionalLight(0xffffff, 0.85); d1.position.set(2, 3, 2); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0x88aaff, 0.35); d2.position.set(-2, -1, -2); scene.add(d2);
+  const grid = new THREE.GridHelper(4, 16, 0x2a323d, 0x161c24);
+  grid.position.y = -1.05; scene.add(grid);
+  vc.appendChild(renderer.domElement);
+  new ResizeObserver(() => {
+    const w = vc.clientWidth, h = vc.clientHeight;
+    if (w && h) { renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  }).observe(vc);
+  (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+  ready = true;
+}
+
+function show(text) {
+  if (!ready) init();
+  if (model) { scene.remove(model); model.traverse(o => { o.geometry && o.geometry.dispose(); }); }
+  let obj;
+  try { obj = new OBJLoader().parse(text); } catch (e) { vmeta.textContent = 'Could not parse .obj: ' + e; return; }
+  const mat = new THREE.MeshStandardMaterial({ color: 0x8fb6ff, metalness: 0.12, roughness: 0.55,
+                                               side: THREE.DoubleSide, flatShading: false });
+  let tris = 0, verts = 0;
+  obj.traverse(c => { if (c.isMesh) { c.material = mat; c.geometry.computeVertexNormals();
+    const g = c.geometry; verts += g.attributes.position.count;
+    tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  const maxd = Math.max(size.x, size.y, size.z) || 1;
+  obj.position.sub(center); obj.scale.setScalar(2 / maxd);
+  model = obj; scene.add(obj);
+  camera.position.set(2.4, 1.7, 2.8); controls.target.set(0, 0, 0); controls.update();
+  vhint.style.display = 'none';
+  vmeta.textContent = `${verts.toLocaleString()} vertices · ${Math.round(tris).toLocaleString()} triangles`;
+}
+
+document.querySelector('input[name=mesh]').addEventListener('change', e => {
+  const file = e.target.files[0]; if (!file) return;
+  vmeta.textContent = 'Loading preview…';
+  const r = new FileReader();
+  r.onload = () => show(r.result);
+  r.onerror = () => { vmeta.textContent = 'Could not read file.'; };
+  r.readAsText(file);
 });
 </script>
 </body>
