@@ -20,7 +20,7 @@ CORE_ORIGIN = 8
 
 
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
-                 grid=None, want_anchors=False):
+                 grid=None, want_anchors=False, max_grid=256):
     """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
 
     size           core size name (XS..XXXXXL); sets the voxel resolution unless `grid`.
@@ -32,11 +32,17 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     want_anchors   also return a smooth_fn projecting each surface vertex to the nearest
                    mesh point (the "forcibly smooth a jagged edge" deflection), else None.
     """
-    core_vox = E.core_voxel_size(size)
+    core_vox = E.core_build_voxels(size)          # true voxel resolution (4x world size)
     if grid is None:
         grid = max(1, int(round(core_vox * fill_fraction)))
     if grid > core_vox:
-        raise ValueError(f"grid {grid} exceeds {size} core voxel size {core_vox}")
+        raise ValueError(f"grid {grid} exceeds {size} core build resolution {core_vox}")
+    if grid > max_grid:
+        # perf guard: a solid grid^3 shape is ~grid^3 voxels; beyond ~256 the pure-Python
+        # emitter/voxelizer get slow and blueprints large. Cap unless the caller lifts it.
+        print(f"[obj] grid {grid} capped to {max_grid} for performance "
+              f"(pass max_grid= to raise; fills {100*max_grid//core_vox}% of the {size} core)")
+        grid = max_grid
     verts, faces = VX.load_obj(obj_path)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
@@ -54,11 +60,13 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
 
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
-                     hollow=False, smooth=False, grid=None, name=None, material=None):
+                     hollow=False, smooth=False, grid=None, name=None, material=None,
+                     max_grid=256):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
     onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
     voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
-                                     hollow=hollow, grid=grid, want_anchors=smooth)
+                                     hollow=hollow, grid=grid, want_anchors=smooth,
+                                     max_grid=max_grid)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]

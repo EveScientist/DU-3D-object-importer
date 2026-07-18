@@ -38,12 +38,21 @@ ELEMENT_ID = {
 
 
 def core_voxel_size(size):
-    """Voxel edge length of a core size name (e.g. 'M' -> 128)."""
+    """WORLD edge length of a core size name (e.g. 'M' -> 128). NB: this is the world/metre
+    size, NOT the voxel resolution -- cell->world is /4, so the buildable voxel grid is 4x
+    this (see core_build_voxels)."""
     return CORE_SIZES[size.upper()][1]
 
 
 def core_height(size):
     return CORE_SIZES[size.upper()][0]
+
+
+def core_build_voxels(size):
+    """The core's actual buildable voxel grid per axis = (1<<(height-3))*32 = 4*world_size.
+    M -> 512 (not 128); XS -> 128. This is the real resolution ceiling for imported shapes
+    (the old core_voxel_size basis used 1/4 of it, so shapes were 4x coarser than possible)."""
+    return (1 << (CORE_SIZES[size.upper()][0] - 3)) * 32
 
 
 def build_envelope(voxel_records, size='M', core_type='static', name='Construct',

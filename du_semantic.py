@@ -26,6 +26,7 @@ Old-lineage laws (val/pad/lead/gap/mc, all layout hooks/pockets) are NOT used an
 they were RLE distance arithmetic all along and dissolved under direct serialization.
 """
 import struct
+import numpy as np
 
 MAT_HCCARBON = (3417309861, 'hcCarbon')
 MAT_DEBUG1 = (157903047, 'Debug1\x00\x00')
@@ -129,52 +130,58 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
     io = inner_origin
     ro = (io[0] - 1, io[1] - 1, io[2] - 1)
     N = 35 * 35 * 35
+    b = (io[0] - 2, io[1] - 2, io[2] - 2)          # window base voxel (index 0)
 
-    # material window: the chunk's copy of the shape, voxels [inner-2, inner+32]
-    matwin = {v for v in voxels
-              if all(io[i] - 2 <= v[i] <= io[i] + 32 for i in range(3))}
+    # occupancy of the material window [inner-2, inner+32] as a (36,36,36) numpy grid
+    # (index a -> voxel base+a; slots 0..34 = matwin voxels, slot 35 = the +33 phantom).
+    # `voxels` may be the whole shape OR a pre-windowed subset (build_blueprint_sem buckets
+    # by chunk so this stays O(window), not O(shape) per chunk).
+    occ = np.zeros((36, 36, 36), bool)
+    for (vx, vy, vz) in voxels:
+        x, y, z = vx - b[0], vy - b[1], vz - b[2]
+        if 0 <= x <= 34 and 0 <= y <= 34 and 0 <= z <= 34:
+            occ[x, y, z] = True
+    mat_occ = occ[:35, :35, :35]                   # materials from matwin only (no phantom)
 
-    # vertex window: [inner-2, inner+33] with the +33 plane per axis a COPY of the
-    # +32 plane (the "phantom"; winfit 2026-07-18: copy beats true-row on the curved
-    # seam donors 3400/3432/3436, uniform over X/Y/Z)
-    win = set(matwin)
-    for a in range(3):
-        ext = {tuple(c + (1 if i == a else 0) for i, c in enumerate(v))
-               for v in win if v[a] == io[a] + 32}
-        win |= ext
+    # vertex window = matwin + phantom +33 plane per axis = COPY of the +32 plane, applied
+    # sequentially x,y,z (matches the old set-union order incl. cross-axis phantoms).
+    win = occ.copy()
+    win[35, :, :] |= win[34, :, :]
+    win[:, 35, :] |= win[:, 34, :]
+    win[:, :, 35] |= win[:, :, 34]
 
-    # dense arrays in index order (z fastest)
-    mats = [None] * N
-    for (vx, vy, vz) in matwin:
-        # material cell = voxel+1 -> local index of cell (v+1)-ro
-        x, y, z = vx + 1 - ro[0], vy + 1 - ro[1], vz + 1 - ro[2]
-        if 0 <= x < 35 and 0 <= y < 35 and 0 <= z < 35:
-            mats[(x * 35 + y) * 35 + z] = mat_idx
+    # surface-corner predicate: grid cell [x,y,z] (abs cell ro+[x,y,z]) counts the 8 voxels
+    # win[x+1-dx, y+1-dy, z+1-dz]; a vertex exists where 1<=count<=7.
+    count = np.zeros((35, 35, 35), np.int8)
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                count += win[1 - dx:36 - dx, 1 - dy:36 - dy, 1 - dz:36 - dz]
+    surface = (count >= 1) & (count <= 7)
 
     open_pos, seam_pos = canonical_y_payload(voxels, io)
     ypay = dict(open_pos)
     if yseam_payload:
         ypay.update(seam_pos)
 
+    # materials list (z-fastest C order) -- mat_idx where occupied else None
+    mats = np.where(mat_occ.reshape(-1), mat_idx, -1).tolist()
+    mats = [None if v < 0 else v for v in mats]
+
+    # vertices: default (126,126,126) at every surface cell, then apply sparse pos overrides
     verts = [None] * N
-    corner = set()
-    for (vx, vy, vz) in win:
-        for dx in (0, 1):
-            for dy in (0, 1):
-                for dz in (0, 1):
-                    corner.add((vx + dx, vy + dy, vz + dz))
-    for p in corner:
-        n = sum(1 for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)
-                if (p[0] - dx, p[1] - dy, p[2] - dz) in win)
-        if n == 8:
-            continue                       # strictly interior corner
-        x, y, z = p[0] - ro[0], p[1] - ro[1], p[2] - ro[2]
-        if not (0 <= x < 35 and 0 <= y < 35 and 0 <= z < 35):
-            continue
-        pos = pos_fn(p) if pos_fn is not None else None
-        if pos is None and ypay:
-            pos = ypay.get(p)
-        verts[(x * 35 + y) * 35 + z] = tuple(pos) if pos is not None else (126, 126, 126)
+    sidx = np.flatnonzero(surface.reshape(-1))
+    for idx in sidx.tolist():
+        verts[idx] = (126, 126, 126)
+    if pos_fn is not None or ypay:
+        for idx in sidx.tolist():
+            x = idx // (35 * 35); y = (idx // 35) % 35; z = idx % 35
+            p = (ro[0] + x, ro[1] + y, ro[2] + z)
+            pos = pos_fn(p) if pos_fn is not None else None
+            if pos is None and ypay:
+                pos = ypay.get(p)
+            if pos is not None:
+                verts[idx] = tuple(pos)
 
     out = bytearray()
     out += struct.pack('<I', CELL_MAGIC) + struct.pack('<I', CELL_VERSION)
@@ -228,11 +235,37 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
     return bytes(out)
 
 
+def bucket_by_chunk(voxels):
+    """{chunk_key: [voxels]} keyed by voxel//32 -- lets callers hand each build_cell only its
+    local window instead of the whole shape (O(window) vs O(shape) per chunk)."""
+    buckets = {}
+    for v in voxels:
+        buckets.setdefault((v[0] // 32, v[1] // 32, v[2] // 32), []).append(v)
+    return buckets
+
+
+def window_voxels(buckets, io):
+    """Voxels of the material/vertex window [inner-2, inner+33] for a chunk, gathered from the
+    3x3x3 neighbourhood of buckets (the window reaches 2 below and 1 above the chunk)."""
+    cx, cy, cz = io[0] // 32, io[1] // 32, io[2] // 32
+    win = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for v in buckets.get((cx + dx, cy + dy, cz + dz), ()):
+                    if (io[0] - 2 <= v[0] <= io[0] + 33 and io[1] - 2 <= v[1] <= io[1] + 33
+                            and io[2] - 2 <= v[2] <= io[2] + 33):
+                        win.append(v)
+    return win
+
+
 def build_chunks(voxels, material=MAT_HCCARBON, pos_fn=None, mapping=None, mat_idx=2,
                  yseam_payload=True):
     """{chunk_key: cell bytes} for every chunk owning >=1 voxel. voxels = absolute set."""
-    keys = {tuple(c // 32 for c in v) for v in voxels}
-    return {k: build_cell(voxels, (32 * k[0], 32 * k[1], 32 * k[2]), material=material,
+    buckets = bucket_by_chunk(voxels)
+    keys = set(buckets)
+    return {k: build_cell(window_voxels(buckets, (32*k[0], 32*k[1], 32*k[2])),
+                          (32 * k[0], 32 * k[1], 32 * k[2]), material=material,
                           pos_fn=pos_fn, mapping=mapping, mat_idx=mat_idx,
                           yseam_payload=yseam_payload)
             for k in sorted(keys)}

@@ -329,6 +329,7 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     # a fixed chunk0 (mismatch = empty meshes, dep23). Non-empty leaves + all ancestors to the
     # single root h(core_h); DU regenerates LOD content from h3 (phantoms unneeded).
     want = octree_from_cells(vox_abs, core_h)
+    buckets = du_semantic.bucket_by_chunk(vox_abs)   # per-chunk windows: O(window)/chunk
     entries = []
     for (h, x, y, z) in sorted(want):
         e = copy.deepcopy(proto)
@@ -337,7 +338,8 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             e[k] = {'$numberLong': v}
         io = (32 * x, 32 * y, 32 * z)
         if h == 3:
-            body = du_semantic.build_cell(vox_abs, io, material=mat, pos_fn=pos_fn,
+            win = du_semantic.window_voxels(buckets, io)
+            body = du_semantic.build_cell(win, io, material=mat, pos_fn=pos_fn,
                                           yseam_payload=yseam_payload)
         else:
             body = du_semantic.build_cell(set(), io,

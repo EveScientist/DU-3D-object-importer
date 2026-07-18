@@ -138,20 +138,59 @@ def _closest_on_triangle(p, a, b, c):
     return a + ab * v + ac * w
 
 
+def _closest_on_triangle_batch(P, a, b, c):
+    """Closest points on triangle abc for an (N,3) array of query points P -- vectorized
+    Ericson region test. Returns (N,3)."""
+    ab = b - a; ac = c - a
+    ap = P - a
+    d1 = ap @ ab; d2 = ap @ ac
+    bp = P - b; d3 = bp @ ab; d4 = bp @ ac
+    cp = P - c; d5 = cp @ ab; d6 = cp @ ac
+    va = d3 * d6 - d5 * d4
+    vb = d5 * d2 - d1 * d6
+    vc = d1 * d4 - d3 * d2
+    out = np.empty_like(P)
+    # default: interior (barycentric)
+    denom = va + vb + vc
+    denom = np.where(np.abs(denom) < 1e-20, 1e-20, denom)
+    v = (vb / denom)[:, None]; w = (vc / denom)[:, None]
+    out[:] = a + ab * v + ac * w
+    # vertex/edge regions (later assignments win; order matches the scalar cascade priority)
+    eab = (vc <= 0) & (d1 >= 0) & (d3 <= 0)
+    t = np.where((d1 - d3) == 0, 0, d1 / np.where((d1 - d3) == 0, 1, d1 - d3))
+    out[eab] = (a + t[:, None] * ab)[eab]
+    ebc = (va <= 0) & ((d4 - d3) >= 0) & ((d5 - d6) >= 0)
+    dd = (d4 - d3) + (d5 - d6)
+    t = np.where(dd == 0, 0, (d4 - d3) / np.where(dd == 0, 1, dd))
+    out[ebc] = (b + t[:, None] * (c - b))[ebc]
+    eca = (vb <= 0) & (d2 >= 0) & (d6 <= 0)
+    t = np.where((d2 - d6) == 0, 0, d2 / np.where((d2 - d6) == 0, 1, d2 - d6))
+    out[eca] = (a + t[:, None] * ac)[eca]
+    out[(d1 <= 0) & (d2 <= 0)] = a
+    out[(d3 >= 0) & (d4 <= d3)] = b
+    out[(d6 >= 0) & (d5 <= d6)] = c
+    return out
+
+
 def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz):
-    """For each of the 8 corners of every intersected voxel, keep the closest mesh point
-    across all triangles (nearest-surface projection target for smoothing)."""
-    for x, y, z in zip(ix, iy, iz):
-        for dx in (0, 1):
-            for dy in (0, 1):
-                for dz in (0, 1):
-                    corner = (int(x) + dx, int(y) + dy, int(z) + dz)
-                    p = np.array(corner, float)
-                    q = _closest_on_triangle(p, v0, v1, v2)
-                    d2 = float((q - p) @ (q - p))
-                    prev = anchors.get(corner)
-                    if prev is None or d2 < prev[1]:
-                        anchors[corner] = (tuple(q), d2)
+    """Keep, per voxel corner, the closest mesh point across all triangles (the smoothing
+    projection target). Vectorized: all 8 corners of every intersected voxel projected to
+    this triangle in one batch."""
+    if len(ix) == 0:
+        return
+    base = np.stack([ix, iy, iz], 1)                       # (M,3)
+    offs = np.array([(dx, dy, dz) for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)])
+    corners = (base[:, None, :] + offs[None, :, :]).reshape(-1, 3)   # (8M,3)
+    corners = np.unique(corners, axis=0)
+    P = corners.astype(float)
+    Q = _closest_on_triangle_batch(P, v0, v1, v2)
+    d2 = np.einsum('ij,ij->i', Q - P, Q - P)
+    for k in range(len(corners)):
+        key = (int(corners[k, 0]), int(corners[k, 1]), int(corners[k, 2]))
+        prev = anchors.get(key)
+        dk = float(d2[k])
+        if prev is None or dk < prev[1]:
+            anchors[key] = ((float(Q[k, 0]), float(Q[k, 1]), float(Q[k, 2])), dk)
 
 
 def _scan_axis(verts, faces, grid, axis):
