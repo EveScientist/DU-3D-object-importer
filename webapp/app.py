@@ -71,14 +71,18 @@ def preview():
     obj_path = os.path.join(WORKDIR, f'{token}_pv{_ext}')
     up.save(obj_path)
     try:
-        pv_grid = min(o['max_grid'], 64)                 # cap: fast, light preview
+        # preview at the DOWNLOAD resolution, capped for a snappy interactive re-render.
+        pv_cap = 160
+        pv_grid = min(o['max_grid'], pv_cap)
         voxels, smooth_fn = F.voxelize_obj(
             obj_path, size=o['size'], fill_fraction=o['fill'], hollow=o['hollow'],
             want_anchors=o['smooth'], max_grid=pv_grid, min_thickness=o['min_thickness'])
         verts, tris = F.preview_mesh(voxels, smooth_fn if o['smooth'] else None)
+        full = min(int(round(E.core_build_voxels(o['size']) * o['fill'])), o['max_grid'])
         return jsonify(v=[round(x, 3) for x in verts], f=tris,
                        voxels=len(voxels), size=o['size'], mode=o['mode'],
-                       fill=o['fill'], build=E.core_build_voxels(o['size']))
+                       fill=o['fill'], build=E.core_build_voxels(o['size']),
+                       preview_grid=min(full, pv_cap), full_grid=full)
     except Exception as ex:
         traceback.print_exc()
         return jsonify(error=f'Preview failed: {ex}'), 500

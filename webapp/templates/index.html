@@ -311,7 +311,9 @@ async function showResult() {
     const frac = d.mode === 'auto' ? 0.95 : d.fill;
     const mesh = new THREE.Mesh(g, MAT); fit(mesh, 2 * frac); grp.add(mesh);
     panelOut.set(grp);
-    metaOut.textContent = `${d.size} core — ${d.voxels.toLocaleString()} voxels · fills ~${Math.round(frac * 100)}% of the core`;
+    let res = `preview @ grid ${d.preview_grid}`;
+    if (d.full_grid > d.preview_grid) res += ` · download is full grid ${d.full_grid} (sharper)`;
+    metaOut.textContent = `${d.size} core — ${d.voxels.toLocaleString()} voxels · fills ~${Math.round(frac * 100)}% · ${res}`;
   } catch (e) { if (mine === seq) metaOut.textContent = e.message; }
   finally { if (mine === seq) panelOut.loading(false); }
 }
