@@ -349,8 +349,41 @@ def fill_solid(surface, grid):
     return out
 
 
+def _erode(occ, n):
+    """Erode a 3D boolean occupancy array by n layers (6-connectivity): a voxel survives
+    iff it and all 6 face-neighbours were solid, repeated n times. numpy shift-and-AND."""
+    for _ in range(n):
+        e = occ.copy()
+        e[1:, :, :] &= occ[:-1, :, :]; e[:-1, :, :] &= occ[1:, :, :]
+        e[:, 1:, :] &= occ[:, :-1, :]; e[:, :-1, :] &= occ[:, 1:, :]
+        e[:, :, 1:] &= occ[:, :, :-1]; e[:, :, :-1] &= occ[:, :, 1:]
+        occ = e
+    return occ
+
+
+def hollow_shell(solid, grid, thickness):
+    """Hollow a solid voxel set to a shell `thickness` voxels thick: shell = solid minus
+    (solid eroded by `thickness`). Where the shape is thinner than 2*thickness (sharp edges,
+    thin features) erosion clears it, so those regions stay SOLID -- the minimum never
+    over-thins genuine detail. thickness<=0 returns the solid unchanged."""
+    if thickness <= 0 or not solid:
+        return solid
+    lo = [min(v[i] for v in solid) for i in range(3)]
+    hi = [max(v[i] for v in solid) for i in range(3)]
+    p = 1                                          # False border so the outer surface erodes
+    dim = [hi[i] - lo[i] + 1 + 2 * p for i in range(3)]
+    occ = np.zeros(dim, bool)
+    for (x, y, z) in solid:
+        occ[x - lo[0] + p, y - lo[1] + p, z - lo[2] + p] = True
+    inner = _erode(occ, thickness)
+    shell = occ & ~inner
+    xs, ys, zs = np.nonzero(shell)
+    return {(int(xs[k]) + lo[0] - p, int(ys[k]) + lo[1] - p, int(zs[k]) + lo[2] - p)
+            for k in range(len(xs))}
+
+
 def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
-             smooth_normals=True):
+             smooth_normals=True, min_thickness=0):
     """Full voxelization -> (voxels, anchors).
 
     solid_mode='contain' (default): mesh-tight solid by center-in-mesh z-parity -- the
@@ -362,6 +395,8 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     smooth_normals=True: anchor targets projected onto the smooth PN-triangle surface
         (vertex-normal Phong tessellation) so LOW-POLY meshes round out instead of showing
         flat facets at high voxel resolution; False projects onto the flat triangles.
+    min_thickness: for hollow shapes, the shell is at least this many voxels thick (>=1);
+        regions genuinely thinner than 2x this (sharp edges) stay solid, never over-thinned.
 
     Anchors ({surface corner -> nearest mesh point}) always come from the SAT surface pass
     so the smoothing layer has a projection target for every boundary vertex."""
@@ -370,14 +405,16 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
                                         normals=normals)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
-    if hollow:
-        voxels = surface
-    elif solid_mode == 'contain':
-        voxels = solid_by_containment(verts, faces, grid)
-        if not voxels:              # degenerate/open mesh: fall back to the band fill
-            voxels = fill_solid(surface, grid)
+    if solid_mode == 'contain':
+        solid = solid_by_containment(verts, faces, grid) or fill_solid(surface, grid)
     else:
-        voxels = fill_solid(surface, grid)
+        solid = fill_solid(surface, grid)
+    if hollow:
+        # shell of at least min_thickness voxels (>=1). Thin features stay solid because
+        # erosion clears them, so the minimum never over-thins sharp edges.
+        voxels = hollow_shell(solid, grid, max(1, min_thickness))
+    else:
+        voxels = solid
     return voxels, anchors
 
 

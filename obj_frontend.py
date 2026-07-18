@@ -20,7 +20,7 @@ CORE_ORIGIN = 8
 
 
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
-                 grid=None, want_anchors=False, max_grid=256):
+                 grid=None, want_anchors=False, max_grid=256, min_thickness=2):
     """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
 
     size           core size name (XS..XXXXXL); sets the voxel resolution unless `grid`.
@@ -46,7 +46,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     verts, faces = VX.load_obj(obj_path)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
-                                 want_anchors=want_anchors)
+                                 want_anchors=want_anchors, min_thickness=min_thickness)
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core
     lo = [min(v[i] for v in solid) for i in range(3)]
     ex = [max(v[i] for v in solid) - lo[i] + 1 for i in range(3)]
@@ -61,12 +61,12 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
                      hollow=False, smooth=False, grid=None, name=None, material=None,
-                     max_grid=256):
+                     max_grid=256, min_thickness=2):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
     onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
     voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
-                                     max_grid=max_grid)
+                                     max_grid=max_grid, min_thickness=min_thickness)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
