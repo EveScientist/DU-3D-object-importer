@@ -172,8 +172,13 @@ def octree_from_cells(cells, core_h):
     chunk that holds its MATERIAL cell (voxel+1, since materials sit at voxel+(1,1,1)) --
     chunk (v+1)//32. Emitting by voxel//32 drops edge voxels whose material spills into the
     next chunk (the 1-voxel tiling-seam gap). Leaves + all ancestors to the single root
-    h(core_h); placement-agnostic (tracks centering/tiling offsets)."""
-    leaves = {tuple((c[i] + 1) // 32 for i in range(3)) for c in cells}
+    h(core_h); placement-agnostic (tracks centering/tiling offsets). `cells` may be an
+    iterable of triples or an (N,3) numpy array."""
+    import numpy as np
+    arr = cells if isinstance(cells, np.ndarray) else np.asarray(list(cells))
+    if len(arr) == 0:
+        return set()
+    leaves = {(int(a), int(b), int(c)) for a, b, c in np.unique((arr + 1) // 32, axis=0)}
     want = {(3,) + c for c in leaves}
     for L in range(4, core_h + 1):
         shift = L - 3
@@ -292,24 +297,27 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     # bbox on chunk0*32 -- the old OFF=chunk0*32 put the content's MIN corner there, leaving
     # its centre half-an-extent past the anchor (dep19f/dep22 deployed offset by ~half the
     # shape). `place` overrides with an explicit per-axis cell offset (tiling: edge-align).
+    import numpy as np
     anchor = chunk0 * 32
-    if voxels:
-        lo = [min(v[i] for v in voxels) for i in range(3)]
-        hix = [max(v[i] for v in voxels) for i in range(3)]
+    # order-independent (output is built from occupancy) -- no sort, just materialise
+    varr = (np.fromiter((c for v in voxels for c in v), np.int64, count=3 * len(voxels)).reshape(-1, 3)
+            if voxels else np.zeros((0, 3), np.int64))
+    if len(varr):
+        lo = varr.min(0); hix = varr.max(0)
         if place is None:
-            OFF = tuple(anchor - (lo[i] + hix[i]) // 2 for i in range(3))
+            OFF = tuple(int(anchor - (lo[i] + hix[i]) // 2) for i in range(3))
         else:
             OFF = tuple(place)
     else:
         OFF = (anchor, anchor, anchor)
-    vox_abs = {(v[0] + OFF[0], v[1] + OFF[1], v[2] + OFF[2]) for v in voxels}
-    safe, reasons = du_semantic.semantic_confidence(voxels)
+    abs_arr = varr + np.array(OFF, np.int64)                  # placed cells (N,3), numpy
+    safe, reasons = du_semantic.semantic_confidence(varr)
     for r in reasons:
         print(f"[validate] WARNING: {r} -- deploy at own risk / verify with a donor")
     # core-fit check: content must sit inside the octree build volume (2^core_h*32 cells)
     build_cells = (1 << (core_h - 3)) * 32
-    amax = max(max(v) for v in vox_abs) if vox_abs else 0
-    amin = min(min(v) for v in vox_abs) if vox_abs else 0
+    amax = int(abs_arr.max()) if len(abs_arr) else 0
+    amin = int(abs_arr.min()) if len(abs_arr) else 0
     if amin < 0 or amax >= build_cells:
         raise ValueError(f"placed content cells [{amin}..{amax}] fall outside the {size} core "
                          f"build volume [0..{build_cells}) -- scale down or pick a larger core")
@@ -328,8 +336,8 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     # the chunks that really hold the content -- must track the centering/`place` offset, NOT
     # a fixed chunk0 (mismatch = empty meshes, dep23). Non-empty leaves + all ancestors to the
     # single root h(core_h); DU regenerates LOD content from h3 (phantoms unneeded).
-    want = octree_from_cells(vox_abs, core_h)
-    buckets = du_semantic.bucket_by_chunk(vox_abs)   # per-chunk windows: O(window)/chunk
+    want = octree_from_cells(abs_arr, core_h)
+    gocc, glo, gdim = du_semantic.global_occupancy(abs_arr)   # slice windows O(1)/chunk
     entries = []
     for (h, x, y, z) in sorted(want):
         e = copy.deepcopy(proto)
@@ -338,9 +346,9 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             e[k] = {'$numberLong': v}
         io = (32 * x, 32 * y, 32 * z)
         if h == 3:
-            win = du_semantic.window_voxels(buckets, io)
-            body = du_semantic.build_cell(win, io, material=mat, pos_fn=pos_fn,
-                                          yseam_payload=yseam_payload)
+            mo = du_semantic.mat_window(gocc, glo, gdim, io)
+            body = du_semantic.build_cell(None, io, material=mat, pos_fn=pos_fn,
+                                          yseam_payload=yseam_payload, matocc=mo)
         else:
             body = du_semantic.build_cell(set(), io,
                 mapping=[(du_semantic.MAT_DEBUG1[0], du_semantic.MAT_DEBUG1[1], 1)])
@@ -350,9 +358,9 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
         entries.append(e)
     # real Model.Bounds from the material-cell bbox (voxel+1), /4 world units -- DU anchors
     # placement to these; a placeholder box (old bug) deployed the construct offset.
-    if vox_abs:
-        mnb = tuple(min(v[i] for v in vox_abs) + 1 for i in range(3))
-        mxb = tuple(max(v[i] for v in vox_abs) + 1 for i in range(3))
+    if len(abs_arr):
+        mnb = tuple(int(abs_arr[:, i].min()) + 1 for i in range(3))
+        mxb = tuple(int(abs_arr[:, i].max()) + 1 for i in range(3))
         bbox = (mnb, mxb)
     else:
         bbox = None

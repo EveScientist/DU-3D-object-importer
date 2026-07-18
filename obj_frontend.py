@@ -48,11 +48,13 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness)
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core
-    lo = [min(v[i] for v in solid) for i in range(3)]
-    ex = [max(v[i] for v in solid) - lo[i] + 1 for i in range(3)]
-    d = tuple(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i]
+    import numpy as np
+    sarr = np.asarray(list(solid), dtype=np.int64)
+    lo = sarr.min(0); ex = sarr.max(0) - lo + 1
+    d = tuple(int(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i])
               for i in range(3))
-    voxels = {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in solid}
+    placed = sarr + np.array(d, np.int64)
+    voxels = set(map(tuple, placed.tolist()))
     smooth_fn = None
     if want_anchors and anchors:
         smooth_fn = VX.anchor_smooth_fn(anchors, delta=d)   # shifts key AND target by d

@@ -495,7 +495,13 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None):
     base = np.stack([ix, iy, iz], 1)                       # (M,3)
     offs = np.array([(dx, dy, dz) for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)])
     corners = (base[:, None, :] + offs[None, :, :]).reshape(-1, 3)   # (8M,3)
-    corners = np.unique(corners, axis=0)
+    # dedup via 1-D integer key (far faster than np.unique axis=0 sort)
+    mn = corners.min(0)
+    c = corners - mn
+    K = int(c.max()) + 1
+    key = (c[:, 0] * K + c[:, 1]) * K + c[:, 2]
+    _, idx = np.unique(key, return_index=True)
+    corners = corners[idx]
     P = corners.astype(float)
     Q = _closest_on_triangle_batch(P, v0, v1, v2)
     d2 = np.einsum('ij,ij->i', Q - P, Q - P)
@@ -513,31 +519,34 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None):
 
 
 def _scan_axis(verts, faces, grid, axis):
-    """Inside-voxel set by casting rays ALONG `axis` (0=x,1=y,2=z) through each cell centre
-    of the other two axes, even-odd parity. Permute so the ray axis is last, run the z-scan,
-    permute back."""
+    """Inside-voxel occupancy (bool grid^3, ORIGINAL frame) by casting rays ALONG `axis`
+    through each cell centre of the other two axes, even-odd parity. Fills each inside run
+    with a numpy SLICE (no per-voxel Python)."""
     p = [i for i in range(3) if i != axis] + [axis]     # ray axis last
     inv = [p.index(i) for i in range(3)]
     V = verts[:, p]
     v0 = V[faces[:, 0]]; v1 = V[faces[:, 1]]; v2 = V[faces[:, 2]]
     amin = np.minimum(np.minimum(v0, v1), v2)
     amax = np.maximum(np.maximum(v0, v1), v2)
-    # Perturb the ray sample point by tiny INCOMMENSURATE irrationals so rays never pass
-    # exactly through a shared edge / vertex / coplanar ring (the equatorial "knife cut":
-    # a UV sphere's parallel of latitude is a full ring of coplanar edges that the two
-    # perpendicular-axis rays graze simultaneously -> majority vote can't save it). An
-    # off-grid nudge makes such grazes measure-zero. Sub-voxel so classification is unmoved.
+    # Perturb the ray by tiny INCOMMENSURATE irrationals so it never passes exactly through a
+    # shared edge / vertex / coplanar ring (the equatorial "knife cut"). Sub-voxel -> the
+    # inside/outside classification is unchanged, but grazes become measure-zero, which makes
+    # a SINGLE axis robust (the old 3-axis majority vote is no longer needed).
     EA = 1e-3 * math.sqrt(2)
     EB = 1e-3 * math.sqrt(3)
-    inside = set()
-    for a in range(grid):
+    occ = np.zeros((grid, grid, grid), bool)            # permuted [a, b, c]
+    a_lo = max(0, int(math.floor(amin[:, 0].min())))
+    a_hi = min(grid, int(math.ceil(amax[:, 0].max())) + 1)
+    for a in range(a_lo, a_hi):
         pa = a + 0.5 + EA
         ma = (amin[:, 0] <= pa) & (pa <= amax[:, 0])
         if not ma.any():
             continue
         b0, b1, b2 = v0[ma], v1[ma], v2[ma]
         bmn = amin[ma]; bmx = amax[ma]
-        for b in range(grid):
+        b_lo = max(0, int(math.floor(bmn[:, 1].min())))
+        b_hi = min(grid, int(math.ceil(bmx[:, 1].max())) + 1)
+        for b in range(b_lo, b_hi):
             pb = b + 0.5 + EB
             mb = (bmn[:, 1] <= pb) & (pb <= bmx[:, 1])
             if not mb.any():
@@ -547,31 +556,28 @@ def _scan_axis(verts, faces, grid, axis):
                 continue
             cs.sort()
             for i in range(0, len(cs) - 1, 2):
-                c0 = int(math.ceil(cs[i] - 0.5)); c1 = int(math.floor(cs[i + 1] - 0.5))
-                for c in range(max(0, c0), min(grid - 1, c1) + 1):
-                    cell = (a, b, c)                        # in permuted frame
-                    inside.add((cell[inv[0]], cell[inv[1]], cell[inv[2]]))
-    return inside
+                c0 = max(0, int(math.ceil(cs[i] - 0.5)))
+                c1 = min(grid - 1, int(math.floor(cs[i + 1] - 0.5)))
+                if c1 >= c0:
+                    occ[a, b, c0:c1 + 1] = True
+    return np.transpose(occ, inv)                        # back to original frame
 
 
-def solid_by_containment(verts, faces, grid, robust=True):
-    """Mesh-tight solid: a voxel is filled iff its CENTRE is inside the mesh. The boundary
-    sits ON the surface (unlike the conservative SAT band), so surface-vertex corners are
-    within +-0.5 vox of the mesh and smoothing deflections stay sub-voxel like the game's
-    own smooth exports. Watertight meshes required for a correct interior.
+def solid_by_containment(verts, faces, grid, robust=False):
+    """Mesh-tight solid (set of inside voxels): a voxel is filled iff its CENTRE is inside the
+    mesh (ray even-odd parity). The boundary sits ON the surface so smoothing deflections stay
+    sub-voxel. Watertight meshes required for a correct interior.
 
-    robust=True casts rays along ALL THREE axes and MAJORITY-votes (>=2 of 3) -- this fixes
-    the single-axis degeneracies (rays grazing shared triangle edges/vertices) that leave
-    'knife-cut' missing columns on grid-aligned meshes like a UV sphere (dep19d). robust=
-    False is the fast single z-scan (fine for meshes without axis-aligned edges)."""
-    if not robust:
-        return _scan_axis(verts, faces, grid, 2)
-    from collections import Counter
-    votes = Counter()
-    for axis in (0, 1, 2):
-        for v in _scan_axis(verts, faces, grid, axis):
-            votes[v] += 1
-    return {v for v, n in votes.items() if n >= 2}
+    Ray perturbation makes a SINGLE z-scan robust (default). robust=True casts all 3 axes and
+    majority-votes (>=2) -- kept as a fallback for pathological non-manifold meshes."""
+    if robust:
+        occ = (_scan_axis(verts, faces, grid, 0).astype(np.int8)
+               + _scan_axis(verts, faces, grid, 1)
+               + _scan_axis(verts, faces, grid, 2)) >= 2
+    else:
+        occ = _scan_axis(verts, faces, grid, 2)
+    xs, ys, zs = np.nonzero(occ)
+    return set(zip(xs.tolist(), ys.tolist(), zs.tolist()))
 
 
 def _ray_z_hits(v0, v1, v2, px, py):

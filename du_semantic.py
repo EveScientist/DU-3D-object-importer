@@ -122,11 +122,15 @@ def canonical_y_payload(voxels, io, zlo=None, zhi=None):
 
 
 def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
-               mapping=None, mat_idx=2, yseam_payload=True):
+               mapping=None, mat_idx=2, yseam_payload=True, matocc=None):
     """One chunk record body (uncompressed). voxels = GLOBAL absolute voxel set.
     inner_origin = 32*chunk_key triple. pos_fn(cell)->(px,py,pz) or None for default.
     mapping/mat_idx: override the material palette (donor palettes vary by build
-    session, e.g. 3325 has hcCarbon at slot 3)."""
+    session, e.g. 3325 has hcCarbon at slot 3).
+    matocc: FAST PATH -- a (35,35,35) bool occupancy of the material window [io-2, io+32]
+    (build_blueprint_sem slices it from a global grid). When given, skips the per-voxel
+    loop AND the canonical Y-seam payload (generation doesn't need the blocky build-state
+    payload -- DU accepts plain; pos_fn handles all smoothing)."""
     io = inner_origin
     ro = (io[0] - 1, io[1] - 1, io[2] - 1)
     N = 35 * 35 * 35
@@ -134,13 +138,14 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
 
     # occupancy of the material window [inner-2, inner+32] as a (36,36,36) numpy grid
     # (index a -> voxel base+a; slots 0..34 = matwin voxels, slot 35 = the +33 phantom).
-    # `voxels` may be the whole shape OR a pre-windowed subset (build_blueprint_sem buckets
-    # by chunk so this stays O(window), not O(shape) per chunk).
     occ = np.zeros((36, 36, 36), bool)
-    for (vx, vy, vz) in voxels:
-        x, y, z = vx - b[0], vy - b[1], vz - b[2]
-        if 0 <= x <= 34 and 0 <= y <= 34 and 0 <= z <= 34:
-            occ[x, y, z] = True
+    if matocc is not None:
+        occ[:35, :35, :35] = matocc
+    else:
+        for (vx, vy, vz) in voxels:
+            x, y, z = vx - b[0], vy - b[1], vz - b[2]
+            if 0 <= x <= 34 and 0 <= y <= 34 and 0 <= z <= 34:
+                occ[x, y, z] = True
     mat_occ = occ[:35, :35, :35]                   # materials from matwin only (no phantom)
 
     # vertex window = matwin + phantom +33 plane per axis = COPY of the +32 plane, applied
@@ -159,10 +164,13 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
                 count += win[1 - dx:36 - dx, 1 - dy:36 - dy, 1 - dz:36 - dz]
     surface = (count >= 1) & (count <= 7)
 
-    open_pos, seam_pos = canonical_y_payload(voxels, io)
-    ypay = dict(open_pos)
-    if yseam_payload:
-        ypay.update(seam_pos)
+    if matocc is not None:
+        ypay = {}
+    else:
+        open_pos, seam_pos = canonical_y_payload(voxels, io)
+        ypay = dict(open_pos)
+        if yseam_payload:
+            ypay.update(seam_pos)
 
     # materials list (z-fastest C order) -- mat_idx where occupied else None
     mats = np.where(mat_occ.reshape(-1), mat_idx, -1).tolist()
@@ -259,6 +267,33 @@ def window_voxels(buckets, io):
     return win
 
 
+def global_occupancy(voxels):
+    """Dense (bool grid, lo, dim) over the shape's voxel bounding box -- a chunk's material
+    window is then a numpy SLICE (O(1)) instead of per-voxel Python filtering. `voxels` may
+    be a set of triples or an (N,3) numpy array (fast path, vectorized fill)."""
+    arr = voxels if isinstance(voxels, np.ndarray) else np.asarray(list(voxels))
+    lo = tuple(int(arr[:, i].min()) for i in range(3))
+    dim = tuple(int(arr[:, i].max()) - lo[i] + 1 for i in range(3))
+    g = np.zeros(dim, bool)
+    g[arr[:, 0] - lo[0], arr[:, 1] - lo[1], arr[:, 2] - lo[2]] = True
+    return g, lo, dim
+
+
+def mat_window(gocc, lo, dim, io):
+    """(35,35,35) bool material window [io-2, io+32] sliced from the global occupancy."""
+    out = np.zeros((35, 35, 35), bool)
+    ss, ds = [], []
+    for i in range(3):
+        a0 = io[i] - 2
+        s0 = max(a0, lo[i]); s1 = min(a0 + 35, lo[i] + dim[i])
+        if s1 <= s0:
+            return out
+        ss.append(slice(s0 - lo[i], s1 - lo[i]))
+        ds.append(slice(s0 - a0, s1 - a0))
+    out[tuple(ds)] = gocc[tuple(ss)]
+    return out
+
+
 def build_chunks(voxels, material=MAT_HCCARBON, pos_fn=None, mapping=None, mat_idx=2,
                  yseam_payload=True):
     """{chunk_key: cell bytes} for every chunk owning >=1 voxel. voxels = absolute set."""
@@ -285,12 +320,18 @@ def semantic_confidence(voxels):
     Flat/single-axis/single-chunk shapes of any size and column height are geometrically
     routine -- NOT flagged."""
     reasons = []
-    xs = [v[0] for v in voxels]; ys = [v[1] for v in voxels]; zs = [v[2] for v in voxels]
-    cross = [min(a) // 32 != max(a) // 32 for a in (xs, ys, zs)]
-    tops = {}
-    for (x, y, z) in voxels:
-        tops[(x, y)] = max(tops.get((x, y), z), z)
-    curved = len({t for t in tops.values()}) > 1
+    arr = voxels if isinstance(voxels, np.ndarray) else np.asarray(list(voxels))
+    if len(arr) == 0:
+        return True, reasons
+    cross = [int(arr[:, i].min()) // 32 != int(arr[:, i].max()) // 32 for i in range(3)]
+    # curved iff the per-(x,y) column top z is not uniform -- vectorized via lexsort on (x,y)
+    order = np.lexsort((arr[:, 1], arr[:, 0]))
+    a = arr[order]
+    xy = a[:, :2]
+    boundary = np.any(xy[1:] != xy[:-1], axis=1)
+    seg_ends = np.append(np.flatnonzero(boundary), len(a) - 1)
+    tops = np.maximum.reduceat(a[:, 2], np.concatenate(([0], seg_ends[:-1] + 1)))
+    curved = len(np.unique(tops)) > 1
     if curved and sum(cross) >= 2:
         reasons.append("curved shape crossing >=2 chunk axes (curved corner): Y-seam "
                        "payload interaction at a corner is donor-unverified")
