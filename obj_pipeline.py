@@ -168,11 +168,12 @@ def core_octree_params(size):
 
 
 def octree_from_cells(cells, core_h):
-    """MINIMAL valid octree {(h,x,y,z)} from ABSOLUTE material cells: every non-empty leaf
-    chunk (cell//32) plus all ancestors up to the single root h(core_h). This is placement-
-    agnostic -- it reads where the content actually is, so it tracks any centering/tiling
-    offset (unlike compute_lod_set_octree which assumes the fixed chunk0 origin)."""
-    leaves = {tuple(c[i] // 32 for i in range(3)) for c in cells}
+    """MINIMAL valid octree {(h,x,y,z)} from ABSOLUTE VOXEL cells: a voxel is OWNED by the
+    chunk that holds its MATERIAL cell (voxel+1, since materials sit at voxel+(1,1,1)) --
+    chunk (v+1)//32. Emitting by voxel//32 drops edge voxels whose material spills into the
+    next chunk (the 1-voxel tiling-seam gap). Leaves + all ancestors to the single root
+    h(core_h); placement-agnostic (tracks centering/tiling offsets)."""
+    leaves = {tuple((c[i] + 1) // 32 for i in range(3)) for c in cells}
     want = {(3,) + c for c in leaves}
     for L in range(4, core_h + 1):
         shift = L - 3
