@@ -333,11 +333,40 @@ def vertex_normals(verts, faces):
     return vn / np.where(ln < 1e-20, 1.0, ln)
 
 
-def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None):
+def corner_normals(verts, faces, crease_deg=35.0):
+    """Per-(face, corner) normals, CREASE-LIMITED: a corner averages only the incident faces
+    whose normal is within `crease_deg` of this face's normal. So a flat face keeps its face
+    normal (PN stays flat) and a sharp edge keeps each side's own normal (PN stays sharp) --
+    only genuinely-curved neighbourhoods blend and round. Returns (M, 3, 3)."""
+    import math
+    from collections import defaultdict
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]],
+                  verts[faces[:, 2]] - verts[faces[:, 0]])       # area-weighted (|fn| = 2*area)
+    ln = np.linalg.norm(fn, axis=1, keepdims=True)
+    unit = fn / np.where(ln < 1e-20, 1.0, ln)
+    incident = defaultdict(list)
+    for fi in range(len(faces)):
+        for c in range(3):
+            incident[int(faces[fi, c])].append(fi)
+    cos_c = math.cos(math.radians(crease_deg))
+    out = np.empty((len(faces), 3, 3))
+    for fi in range(len(faces)):
+        ni = unit[fi]
+        for c in range(3):
+            acc = np.zeros(3)
+            for j in incident[int(faces[fi, c])]:
+                if unit[j] @ ni >= cos_c:
+                    acc += fn[j]                                # area-weighted blend
+            m = np.linalg.norm(acc)
+            out[fi, c] = acc / m if m > 1e-20 else ni
+    return out
+
+
+def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnormals=None):
     """Surface voxel set (SAT-exact) + optional anchor map {corner -> nearest surface pt}.
-    Numpy-batched per triangle over its candidate voxel slab. If `normals` (per-vertex) are
-    given, anchor targets are projected onto the smooth PN-triangle surface (rounds facets of
-    low-poly meshes) instead of the flat triangle."""
+    Numpy-batched per triangle over its candidate voxel slab. `cnormals` (M,3,3 crease-limited
+    corner normals) projects anchor targets onto the PN-triangle surface, rounding curved
+    regions while keeping flats/sharp edges; `normals` (per-vertex) is the legacy blend."""
     surface = set()
     anchors = {} if want_anchors else None
     for fi, f in enumerate(faces):
@@ -354,7 +383,12 @@ def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None):
         for x, y, z in zip(ix[mask], iy[mask], iz[mask]):
             surface.add((int(x), int(y), int(z)))
         if want_anchors:
-            tn = None if normals is None else (normals[f[0]], normals[f[1]], normals[f[2]])
+            if cnormals is not None:
+                tn = (cnormals[fi, 0], cnormals[fi, 1], cnormals[fi, 2])
+            elif normals is not None:
+                tn = (normals[f[0]], normals[f[1]], normals[f[2]])
+            else:
+                tn = None
             _accumulate_anchors(anchors, v0, v1, v2, ix[mask], iy[mask], iz[mask], tn)
     return surface, anchors
 
@@ -616,30 +650,40 @@ def hollow_shell(solid, grid, thickness):
 
 
 def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
-             smooth_normals=True, min_thickness=0):
+             smooth_normals=True, min_thickness=0, crease_deg=35.0):
     """Full voxelization -> (voxels, anchors).
 
-    solid_mode='contain' (default): mesh-tight solid by center-in-mesh z-parity -- the
-        boundary sits on the surface so smoothing deflections stay sub-voxel (like the
-        game's exports). Best for smoothing; needs a watertight mesh.
-    solid_mode='band': conservative SAT surface + span fill -- robust to non-manifold
-        meshes but the boundary sits ~1 vox proud (blockier, larger smoothing offsets).
+    solid_mode='contain' (default): mesh-tight interior (center-in-mesh z-parity) UNIONED
+        with the conservative SAT surface, so THIN features (< the interior sampling can
+        catch) are still represented; smoothing then pulls the surface layer onto the mesh.
+    solid_mode='band': conservative SAT surface + span fill only.
     hollow=True: surface shell only (no interior), for hulls with a modeled outer skin.
-    smooth_normals=True: anchor targets projected onto the smooth PN-triangle surface
-        (vertex-normal Phong tessellation) so LOW-POLY meshes round out instead of showing
-        flat facets at high voxel resolution; False projects onto the flat triangles.
+    smooth_normals=True: anchor targets projected onto the PN-triangle surface using
+        CREASE-LIMITED corner normals (crease_deg) -- curved regions round out, but flat
+        faces stay flat and sharp edges stay sharp (no rounding of straight lines).
     min_thickness: for hollow shapes, the shell is at least this many voxels thick (>=1);
         regions genuinely thinner than 2x this (sharp edges) stay solid, never over-thinned.
 
     Anchors ({surface corner -> nearest mesh point}) always come from the SAT surface pass
     so the smoothing layer has a projection target for every boundary vertex."""
-    normals = vertex_normals(verts, faces) if (want_anchors and smooth_normals) else None
+    cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
     surface, anchors = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
-                                        normals=normals)
+                                        cnormals=cn)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
     if solid_mode == 'contain':
-        solid = solid_by_containment(verts, faces, grid) or fill_solid(surface, grid)
+        contain = solid_by_containment(verts, faces, grid)
+        if contain:
+            # add ONLY surface voxels with NO containment voxel nearby -- i.e. thin sheets/
+            # fins the interior sampler dropped. Surface voxels hugging a thick boundary have
+            # a containment neighbour and are skipped, so thick solids keep their TIGHT
+            # boundary (sharp edges reachable within the +-1.19 vox deflection clamp).
+            nb = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+            thin = {v for v in surface if v not in contain
+                    and not any((v[0]+a, v[1]+b, v[2]+c) in contain for a, b, c in nb)}
+            solid = contain | thin
+        else:
+            solid = fill_solid(surface, grid)
     else:
         solid = fill_solid(surface, grid)
     if hollow:
