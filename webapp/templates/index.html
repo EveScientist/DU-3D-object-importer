@@ -48,6 +48,12 @@
   #vhint { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
            color:var(--mut); font-size:14px; pointer-events:none; text-align:center; padding:0 20px; }
   #vmeta { color:var(--mut); font-size:12.5px; margin-top:8px; }
+  #vtabs { position:absolute; top:10px; left:10px; z-index:3; display:flex; gap:4px;
+           background:#0e131acc; border:1px solid var(--line); border-radius:8px; padding:3px; }
+  .vtab { background:transparent; color:var(--mut); border:0; border-radius:6px; margin:0;
+          padding:5px 12px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .vtab.active { background:var(--accd); color:#fff; }
+  .vtab:disabled { opacity:.5; cursor:default; }
 </style>
 </head>
 <body>
@@ -69,6 +75,10 @@
     <input type="file" name="mesh" accept=".obj" required>
 
     <div id="viewer" style="margin-top:12px">
+      <div id="vtabs">
+        <button type="button" class="vtab active" data-view="mesh">Input mesh</button>
+        <button type="button" class="vtab" data-view="result" id="tabResult">DU result</button>
+      </div>
       <div id="vhint">Select a <code>.obj</code> file to preview it here — drag to orbit, scroll to zoom.</div>
     </div>
     <div id="vmeta"></div>
@@ -178,8 +188,12 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const vc = document.getElementById('viewer'), vhint = document.getElementById('vhint'),
-      vmeta = document.getElementById('vmeta');
-let renderer, scene, camera, controls, model, ready = false;
+      vmeta = document.getElementById('vmeta'), tabResult = document.getElementById('tabResult'),
+      form = document.getElementById('f');
+const MAT = new THREE.MeshStandardMaterial({ color: 0x8fb6ff, metalness: 0.12, roughness: 0.55,
+                                             side: THREE.DoubleSide, flatShading: false });
+let renderer, scene, camera, controls, group, ready = false;
+let objText = null, meshObj = null, resultObj = null, resultStale = true, view = 'mesh';
 
 function init() {
   const w = vc.clientWidth, h = vc.clientHeight;
@@ -194,8 +208,7 @@ function init() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.65));
   const d1 = new THREE.DirectionalLight(0xffffff, 0.85); d1.position.set(2, 3, 2); scene.add(d1);
   const d2 = new THREE.DirectionalLight(0x88aaff, 0.35); d2.position.set(-2, -1, -2); scene.add(d2);
-  const grid = new THREE.GridHelper(4, 16, 0x2a323d, 0x161c24);
-  grid.position.y = -1.05; scene.add(grid);
+  group = new THREE.Group(); scene.add(group);
   vc.appendChild(renderer.domElement);
   new ResizeObserver(() => {
     const w = vc.clientWidth, h = vc.clientHeight;
@@ -205,32 +218,89 @@ function init() {
   ready = true;
 }
 
-function show(text) {
-  if (!ready) init();
-  if (model) { scene.remove(model); model.traverse(o => { o.geometry && o.geometry.dispose(); }); }
-  let obj;
-  try { obj = new OBJLoader().parse(text); } catch (e) { vmeta.textContent = 'Could not parse .obj: ' + e; return; }
-  const mat = new THREE.MeshStandardMaterial({ color: 0x8fb6ff, metalness: 0.12, roughness: 0.55,
-                                               side: THREE.DoubleSide, flatShading: false });
+// centre + uniformly scale an object so its longest side == `target` world units
+function fit(obj, target) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const s = target / (Math.max(size.x, size.y, size.z) || 1);
+  obj.position.set(-c.x * s, -c.y * s, -c.z * s); obj.scale.setScalar(s);
+}
+
+function render(obj) {
+  while (group.children.length) group.remove(group.children[0]);
+  group.add(obj);
+  camera.position.set(2.4, 1.7, 2.8); controls.target.set(0, 0, 0); controls.update();
+}
+
+function buildMesh() {
+  const o = new OBJLoader().parse(objText);
   let tris = 0, verts = 0;
-  obj.traverse(c => { if (c.isMesh) { c.material = mat; c.geometry.computeVertexNormals();
+  o.traverse(c => { if (c.isMesh) { c.material = MAT; c.geometry.computeVertexNormals();
     const g = c.geometry; verts += g.attributes.position.count;
     tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
-  const box = new THREE.Box3().setFromObject(obj);
-  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
-  const maxd = Math.max(size.x, size.y, size.z) || 1;
-  obj.position.sub(center); obj.scale.setScalar(2 / maxd);
-  model = obj; scene.add(obj);
-  camera.position.set(2.4, 1.7, 2.8); controls.target.set(0, 0, 0); controls.update();
-  vhint.style.display = 'none';
-  vmeta.textContent = `${verts.toLocaleString()} vertices · ${Math.round(tris).toLocaleString()} triangles`;
+  fit(o, 2);
+  meshObj = o;
+  return `Input mesh — ${verts.toLocaleString()} vertices · ${Math.round(tris).toLocaleString()} triangles`;
 }
+
+async function buildResult() {
+  const res = await fetch('/preview', { method: 'POST', body: new FormData(form) });
+  if (!res.ok) { let m = 'Preview failed.'; try { m = (await res.json()).error || m; } catch (_) {} throw new Error(m); }
+  const d = await res.json();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(d.v, 3));
+  g.setIndex(d.f); g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, MAT);
+  // build the object at TRUE scale within the core box: core box = unit cube (side 2),
+  // the shape's longest side = fill_fraction of it (auto mode ~= fills the core).
+  const grp = new THREE.Group();
+  const box = new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+  grp.add(new THREE.Box3Helper(box, 0x3a4756));
+  const fillFrac = d.mode === 'auto' ? 0.95 : d.fill;
+  fit(mesh, 2 * fillFrac);
+  grp.add(mesh);
+  resultObj = grp;
+  const pct = Math.round((d.mode === 'auto' ? 0.95 : d.fill) * 100);
+  return `DU result (${d.size} core) — ${d.voxels.toLocaleString()} voxels · fills ~${pct}% of the core along its longest axis`;
+}
+
+function setTabs() {
+  document.querySelectorAll('.vtab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+}
+
+async function showView(v) {
+  view = v; setTabs();
+  if (!ready) init();
+  vhint.style.display = 'none';
+  if (v === 'mesh') {
+    if (!meshObj && objText) vmeta.textContent = buildMesh();
+    if (meshObj) render(meshObj);
+  } else {
+    if (!objText) { vmeta.textContent = 'Select a .obj first.'; return; }
+    if (resultStale || !resultObj) {
+      vmeta.textContent = 'Building DU preview…';
+      try { const label = await buildResult(); resultStale = false; vmeta.textContent = label; }
+      catch (e) { vmeta.textContent = e.message; view = 'mesh'; setTabs(); return; }
+    } else {
+      vmeta.textContent = vmeta.dataset.result || 'DU result';
+    }
+    if (resultObj) render(resultObj);
+  }
+}
+
+document.querySelectorAll('.vtab').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+
+// re-fetch the result when any build option changes
+form.querySelectorAll('select, input').forEach(el => el.addEventListener('change', () => {
+  resultStale = true;
+  if (view === 'result' && objText) showView('result');
+}));
 
 document.querySelector('input[name=mesh]').addEventListener('change', e => {
   const file = e.target.files[0]; if (!file) return;
   vmeta.textContent = 'Loading preview…';
   const r = new FileReader();
-  r.onload = () => show(r.result);
+  r.onload = () => { objText = r.result; meshObj = null; resultObj = null; resultStale = true; showView('mesh'); };
   r.onerror = () => { vmeta.textContent = 'Could not read file.'; };
   r.readAsText(file);
 });

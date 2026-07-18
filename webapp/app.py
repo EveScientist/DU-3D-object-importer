@@ -33,6 +33,61 @@ def index():
                            core_rows=rows)
 
 
+def _opts(form):
+    def _f(k, d):
+        try:
+            return float(form.get(k, d))
+        except ValueError:
+            return float(d)
+    def _i(k, d):
+        try:
+            return int(form.get(k, d))
+        except ValueError:
+            return int(d)
+    size = form.get('size', 'M').upper()
+    core_type = form.get('core_type', 'static')
+    return dict(
+        size=size if size in E.CORE_SIZES else 'M',
+        core_type=core_type if core_type in CORE_TYPES else 'static',
+        mode=form.get('mode', 'scale'),
+        hollow=form.get('hollow') == 'on',
+        smooth=form.get('smooth') == 'on',
+        fill=min(max(_f('fill', 0.9), 0.05), 1.0),
+        max_grid=min(max(_i('max_grid', 256), 32), 512),
+        min_thickness=min(max(_i('min_thickness', 2), 1), 16),
+    )
+
+
+@app.route('/preview', methods=['POST'])
+def preview():
+    """Return the VOXELIZED + smoothed result as a surface mesh (flat vertex/tri arrays) so
+    the browser can show what DU will actually build. Voxelized at a capped grid for speed."""
+    up = request.files.get('mesh')
+    if up is None or up.filename == '' or not up.filename.lower().endswith('.obj'):
+        return jsonify(error='Upload a .obj mesh file.'), 400
+    o = _opts(request.form)
+    token = uuid.uuid4().hex[:8]
+    obj_path = os.path.join(WORKDIR, f'{token}_pv.obj')
+    up.save(obj_path)
+    try:
+        pv_grid = min(o['max_grid'], 64)                 # cap: fast, light preview
+        voxels, smooth_fn = F.voxelize_obj(
+            obj_path, size=o['size'], fill_fraction=o['fill'], hollow=o['hollow'],
+            want_anchors=o['smooth'], max_grid=pv_grid, min_thickness=o['min_thickness'])
+        verts, tris = F.preview_mesh(voxels, smooth_fn if o['smooth'] else None)
+        return jsonify(v=[round(x, 3) for x in verts], f=tris,
+                       voxels=len(voxels), size=o['size'], mode=o['mode'],
+                       fill=o['fill'], build=E.core_build_voxels(o['size']))
+    except Exception as ex:
+        traceback.print_exc()
+        return jsonify(error=f'Preview failed: {ex}'), 500
+    finally:
+        try:
+            os.remove(obj_path)
+        except OSError:
+            pass
+
+
 @app.route('/convert', methods=['POST'])
 def convert():
     up = request.files.get('mesh')
@@ -41,30 +96,10 @@ def convert():
     if not up.filename.lower().endswith('.obj'):
         return jsonify(error='Please upload a .obj mesh file.'), 400
 
-    size = request.form.get('size', 'M').upper()
-    core_type = request.form.get('core_type', 'static')
-    mode = request.form.get('mode', 'scale')             # scale | auto
-    hollow = request.form.get('hollow') == 'on'
-    smooth = request.form.get('smooth') == 'on'
-    try:
-        fill = float(request.form.get('fill', '0.9'))
-    except ValueError:
-        fill = 0.9
-    fill = min(max(fill, 0.05), 1.0)
-    try:
-        max_grid = int(request.form.get('max_grid', '256'))
-    except ValueError:
-        max_grid = 256
-    max_grid = min(max(max_grid, 32), 512)
-    try:
-        min_thickness = int(request.form.get('min_thickness', '2'))
-    except ValueError:
-        min_thickness = 2
-    min_thickness = min(max(min_thickness, 1), 16)
-    if size not in E.CORE_SIZES:
-        size = 'M'
-    if core_type not in CORE_TYPES:
-        core_type = 'static'
+    o = _opts(request.form)
+    size, core_type, mode = o['size'], o['core_type'], o['mode']
+    hollow, smooth = o['hollow'], o['smooth']
+    fill, max_grid, min_thickness = o['fill'], o['max_grid'], o['min_thickness']
 
     stem = os.path.splitext(os.path.basename(up.filename))[0][:40] or 'model'
     token = uuid.uuid4().hex[:8]

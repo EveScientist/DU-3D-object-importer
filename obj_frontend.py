@@ -75,6 +75,48 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
     return len(voxels), want
 
 
+_FACES = [
+    ((-1, 0, 0), [(0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0)]),
+    ((1, 0, 0),  [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)]),
+    ((0, -1, 0), [(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)]),
+    ((0, 1, 0),  [(0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0)]),
+    ((0, 0, -1), [(0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)]),
+    ((0, 0, 1),  [(0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]),
+]
+
+
+def preview_mesh(voxels, smooth_fn=None, deflect_cap=100 / 84.0):
+    """Boundary-face surface mesh of a voxel set, with the smoothing deflection applied to
+    shared corners -- a faithful preview of what DU renders (its surface passes through the
+    deflected voxel-corner vertices). Returns (flat_verts[x,y,z,...], flat_tris[i,j,k,...]),
+    corners deduped so normals blend smoothly."""
+    V = voxels if isinstance(voxels, set) else set(voxels)
+    cidx = {}
+    verts = []
+    tris = []
+
+    def ci(c):
+        i = cidx.get(c)
+        if i is None:
+            i = len(verts) // 3
+            cidx[c] = i
+            px, py, pz = float(c[0]), float(c[1]), float(c[2])
+            if smooth_fn is not None:
+                t = smooth_fn(*c)
+                px += max(-deflect_cap, min(deflect_cap, t[0] - c[0]))
+                py += max(-deflect_cap, min(deflect_cap, t[1] - c[1]))
+                pz += max(-deflect_cap, min(deflect_cap, t[2] - c[2]))
+            verts.extend((px, py, pz))
+        return i
+
+    for (x, y, z) in V:
+        for off, corners in _FACES:
+            if (x + off[0], y + off[1], z + off[2]) not in V:
+                a, b, c, d = (ci((x + cx, y + cy, z + cz)) for cx, cy, cz in corners)
+                tris.extend((a, b, c, a, c, d))
+    return verts, tris
+
+
 def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='static',
                       resolution=None, fill_fraction=0.9, hollow=False, smooth=False,
                       name=None, material=None):
