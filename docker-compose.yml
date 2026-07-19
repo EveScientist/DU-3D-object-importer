@@ -14,7 +14,8 @@ services:
       # web UI's max_grid field will ever request (~8.6 GB peak per conversion).
       OBJTODU_MAX_VOXELS: "134217728"
     # Hard cap so a runaway conversion can't take the whole PC down (the OOM lesson
-    # from the shared server). 24g on a 128GB machine leaves plenty of headroom over
-    # OBJTODU_MAX_VOXELS=134217728 (~8.6 GB peak) even with both gunicorn workers maxed.
-    mem_limit: 24g
+    # from the shared server). Measured peak at grid 512 is ~15.3GB single-threaded;
+    # the parallel emitter (OBJTODU_WORKERS, obj_pipeline.py) adds a bit more per worker,
+    # so 40g gives real margin on a 128GB host while still catching a genuine runaway.
+    mem_limit: 40g
     restart: unless-stopped
