@@ -18,8 +18,16 @@ COPY exports/ ./exports/
 # On a PC there is RAM to spare vs the old shared server -- lift the voxel ceiling.
 # 134217728 = 512^3, the largest grid the web UI's max_grid field will ever request
 # (~8.6 GB peak); tune to your machine or override at `docker run`.
+# *_NUM_THREADS=1: our parallelism is PROCESS-level (fork pools in du_voxelize/obj_pipeline),
+# so per-process BLAS/OpenMP threads only oversubscribe -- and worse, an active BLAS
+# threadpool at fork() time DEADLOCKS the pool workers under gunicorn (zombie workers, parent
+# stuck in futex; reproduced at 12 workers/grid 512). Baked in here so the CLI and a fresh
+# clone are protected too, not just docker-compose. Must be set before numpy imports.
 ENV OBJTODU_MAX_VOXELS=134217728 \
     OBJTODU_PIPELINE=/app \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
     PYTHONUNBUFFERED=1
 
 EXPOSE 5002

@@ -27,7 +27,7 @@ import numpy as np
 # Parallelism for _scan_axis's outer `a` loop (see below) -- same env var / default cap as
 # obj_pipeline.py's emitter pool, so one knob controls both.
 _SCAN_PARALLEL_MIN_A = 64
-_DEFAULT_MAX_WORKERS = 8
+_DEFAULT_MAX_WORKERS = 12   # see obj_pipeline._DEFAULT_MAX_WORKERS; one knob via OBJTODU_WORKERS
 
 
 def _n_workers():

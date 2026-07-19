@@ -13,6 +13,13 @@ services:
       # Raise/lower to match your PC's RAM. 134217728 = 512^3, the largest grid the
       # web UI's max_grid field will ever request (~8.6 GB peak per conversion).
       OBJTODU_MAX_VOXELS: "134217728"
+      # Single-thread the BLAS/OpenMP backends: our parallelism is PROCESS-level (fork
+      # pools), so per-process BLAS threads only oversubscribe (12 procs x N threads) AND
+      # an active BLAS threadpool at fork() time deadlocks the pool workers under gunicorn
+      # (zombie workers + parent stuck in futex). Must be set before numpy imports.
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
     # Hard cap so a runaway conversion can't take the whole PC down (the OOM lesson
     # from the shared server). Measured peak at grid 512 is ~15.3GB single-threaded;
     # the parallel emitter (OBJTODU_WORKERS, obj_pipeline.py) adds a bit more per worker,

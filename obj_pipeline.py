@@ -20,8 +20,10 @@ import du_general as dg
 # OBJTODU_WORKERS overrides once you've verified your headroom. Only kicks in with
 # >= _PARALLEL_MIN_CHUNKS chunks (pool startup isn't worth it for small shapes) and only where
 # fork() exists (Linux/Docker) -- see _emit_chunk for why fork specifically is required.
+# 12: measured grid-512 peak stays ~15GB (well under the 40g mem_limit) at this width on
+# the 128GB / 24-core host; raise via OBJTODU_WORKERS if you re-verify headroom.
 _PARALLEL_MIN_CHUNKS = 64
-_DEFAULT_MAX_WORKERS = 8
+_DEFAULT_MAX_WORKERS = 12
 
 
 def _n_workers():
