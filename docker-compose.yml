@@ -12,7 +12,8 @@ services:
     environment:
       # Raise/lower to match your PC's RAM. 60M ~= a few GB peak per conversion.
       OBJTODU_MAX_VOXELS: "60000000"
-    # Optional hard cap so a runaway conversion can't take the whole PC down
-    # (the OOM lesson from the shared server). Uncomment and set to taste:
-    # mem_limit: 8g
+    # Hard cap so a runaway conversion can't take the whole PC down (the OOM lesson
+    # from the shared server). 8g covers OBJTODU_MAX_VOXELS=60000000 (~a few GB peak)
+    # plus headroom for the 2 gunicorn workers; raise/lower to match your PC's RAM.
+    mem_limit: 8g
     restart: unless-stopped
