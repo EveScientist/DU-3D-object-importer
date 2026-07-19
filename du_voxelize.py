@@ -386,14 +386,16 @@ def corner_normals(verts, faces, crease_deg=35.0):
     return out
 
 
-def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnormals=None):
-    """Surface voxel set (SAT-exact) + optional anchor map {corner -> nearest surface pt}.
-    Numpy-batched per triangle over its candidate voxel slab. `cnormals` (M,3,3 crease-limited
-    corner normals) projects anchor targets onto the PN-triangle surface, rounding curved
-    regions while keeping flats/sharp edges; `normals` (per-vertex) is the legacy blend."""
+def _voxelize_surface_faces(verts, faces, grid, want_anchors, normals, cnormals, face_idx):
+    """Core per-triangle loop, over just `face_idx` (an iterable of face indices into
+    `faces`). Shared by the serial path and each parallel worker's chunk -- see
+    voxelize_surface for why splitting by triangle can be parallelized (surface is a plain
+    union across triangles/workers; anchors keeps whichever triangle gave the closest point,
+    which is an associative per-key min, so partial per-worker dicts merge correctly too)."""
     surface = set()
     anchors = {} if want_anchors else None
-    for fi, f in enumerate(faces):
+    for fi in face_idx:
+        f = faces[fi]
         v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
         tri = np.stack([v0, v1, v2])
         lo = np.clip(np.floor(tri.min(0)).astype(int), 0, grid - 1)
@@ -413,8 +415,68 @@ def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnorma
                 tn = (normals[f[0]], normals[f[1]], normals[f[2]])
             else:
                 tn = None
-            _accumulate_anchors(anchors, v0, v1, v2, ix[mask], iy[mask], iz[mask], tn)
+            _accumulate_anchors(anchors, v0, v1, v2, ix[mask], iy[mask], iz[mask], tn, fi)
     return surface, anchors
+
+
+_SURFACE_PARALLEL_MIN_WORK = 8 * 64   # faces * grid; skip pool overhead below this
+_SURF_CTX = None
+
+
+def _voxelize_surface_chunk(worker_i):
+    """Process faces[worker_i::n_workers] (round-robin, not contiguous -- spreads triangles
+    of very different candidate-voxel cost evenly across workers instead of risking one
+    worker getting a run of expensive large triangles). Reads shared inputs from _SURF_CTX
+    (fork/copy-on-write, same reasoning as _scan_axis/_emit_chunk)."""
+    ctx = _SURF_CTX
+    face_idx = range(worker_i, len(ctx['faces']), ctx['n_workers'])
+    return _voxelize_surface_faces(ctx['verts'], ctx['faces'], ctx['grid'], ctx['want_anchors'],
+                                   ctx['normals'], ctx['cnormals'], face_idx)
+
+
+def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnormals=None):
+    """Surface voxel set (SAT-exact) + optional anchor map {corner -> nearest surface pt}.
+    Numpy-batched per triangle over its candidate voxel slab. `cnormals` (M,3,3 crease-limited
+    corner normals) projects anchor targets onto the PN-triangle surface, rounding curved
+    regions while keeping flats/sharp edges; `normals` (per-vertex) is the legacy blend.
+
+    Split across a process pool (round-robin by triangle) when there's enough total work and
+    fork() is available -- large flat triangles (a cube's 12 faces, say) dominate at high
+    grid resolution the same way _scan_axis's outer loop does."""
+    def _strip_fi(anch):
+        # (target, d2, fi) internal form -> public (target, d2); fi only matters during the
+        # per-corner argmin accumulation/merge above.
+        return {k: (v[0], v[1]) for k, v in anch.items()} if anch is not None else anch
+
+    n_workers = _n_workers()
+    use_pool = (len(faces) * grid >= _SURFACE_PARALLEL_MIN_WORK and n_workers > 1
+                and 'fork' in multiprocessing.get_all_start_methods())
+    if not use_pool:
+        surface, anchors = _voxelize_surface_faces(verts, faces, grid, want_anchors,
+                                                   normals, cnormals, range(len(faces)))
+        return surface, _strip_fi(anchors)
+    n = min(n_workers, len(faces))
+    global _SURF_CTX
+    _SURF_CTX = dict(verts=verts, faces=faces, grid=grid, want_anchors=want_anchors,
+                     normals=normals, cnormals=cnormals, n_workers=n)
+    try:
+        ctx = multiprocessing.get_context('fork')
+        with ctx.Pool(n) as pool:
+            parts = pool.map(_voxelize_surface_chunk, range(n))
+    finally:
+        _SURF_CTX = None
+    surface = set()
+    anchors = {} if want_anchors else None
+    for psurf, panch in parts:
+        surface |= psurf
+        if want_anchors:
+            for k, v in panch.items():
+                prev = anchors.get(k)
+                # same (d2, fi) argmin as _accumulate_anchors, so the merged result is
+                # independent of how faces were partitioned across workers.
+                if prev is None or v[1] < prev[1] or (v[1] == prev[1] and v[2] < prev[2]):
+                    anchors[k] = v
+    return surface, _strip_fi(anchors)
 
 
 def _closest_on_triangle(p, a, b, c):
@@ -508,12 +570,20 @@ def _pn_surface(w0, w1, w2, P1, P2, P3, N1, N2, N3):
             + 6 * b111 * u * v * w)
 
 
-def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None):
+def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None, fi=0):
     """Keep, per voxel corner, the closest mesh point across all triangles (the smoothing
     projection target). Vectorized over all 8 corners of every intersected voxel. When tn
     (the three vertex normals) is given, the stored target is the PN-triangle surface point
     (smooth) rather than the flat closest point -- the nearest-triangle metric still uses the
-    flat distance."""
+    flat distance.
+
+    Stored value is (target, d2, fi). `fi` (the source face index) is the TIE-BREAKER: on an
+    exact d2 tie between two triangles (common at a shared edge, where a corner is equidistant
+    to both adjacent faces but their PN targets differ), the lower face index wins. This makes
+    the winner a function of (d2, fi) only -- associative, so splitting the triangle loop
+    across workers (voxelize_surface) yields byte-identical anchors regardless of the split,
+    matching the original serial "process faces 0..M in order, first-closest wins" semantics.
+    voxelize_surface strips fi from the final dict, so the public value stays (target, d2)."""
     if len(ix) == 0:
         return
     base = np.stack([ix, iy, iz], 1)                       # (M,3)
@@ -538,8 +608,9 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None):
         key = (int(corners[k, 0]), int(corners[k, 1]), int(corners[k, 2]))
         prev = anchors.get(key)
         dk = float(d2[k])
-        if prev is None or dk < prev[1]:
-            anchors[key] = ((float(T[k, 0]), float(T[k, 1]), float(T[k, 2])), dk)
+        # (dk, fi) < (prev_d2, prev_fi): min distance, ties broken by lower face index
+        if prev is None or dk < prev[1] or (dk == prev[1] and fi < prev[2]):
+            anchors[key] = ((float(T[k, 0]), float(T[k, 1]), float(T[k, 2])), dk, fi)
 
 
 def _scan_a_range(a_range):
