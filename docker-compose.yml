@@ -10,10 +10,11 @@ services:
     ports:
       - "5002:5002"
     environment:
-      # Raise/lower to match your PC's RAM. 60M ~= a few GB peak per conversion.
-      OBJTODU_MAX_VOXELS: "60000000"
+      # Raise/lower to match your PC's RAM. 134217728 = 512^3, the largest grid the
+      # web UI's max_grid field will ever request (~8.6 GB peak per conversion).
+      OBJTODU_MAX_VOXELS: "134217728"
     # Hard cap so a runaway conversion can't take the whole PC down (the OOM lesson
-    # from the shared server). 8g covers OBJTODU_MAX_VOXELS=60000000 (~a few GB peak)
-    # plus headroom for the 2 gunicorn workers; raise/lower to match your PC's RAM.
-    mem_limit: 8g
+    # from the shared server). 24g on a 128GB machine leaves plenty of headroom over
+    # OBJTODU_MAX_VOXELS=134217728 (~8.6 GB peak) even with both gunicorn workers maxed.
+    mem_limit: 24g
     restart: unless-stopped

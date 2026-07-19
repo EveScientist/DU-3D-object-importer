@@ -16,13 +16,15 @@ COPY webapp/ ./webapp/
 COPY exports/ ./exports/
 
 # On a PC there is RAM to spare vs the old shared server -- lift the voxel ceiling.
-# grid ~391 (60M voxels) ~= a few GB; tune to your machine or override at `docker run`.
-ENV OBJTODU_MAX_VOXELS=60000000 \
+# 134217728 = 512^3, the largest grid the web UI's max_grid field will ever request
+# (~8.6 GB peak); tune to your machine or override at `docker run`.
+ENV OBJTODU_MAX_VOXELS=134217728 \
     OBJTODU_PIPELINE=/app \
     PYTHONUNBUFFERED=1
 
 EXPOSE 5002
 
-# 2 workers, long timeout: a max-res solid voxelization can take tens of seconds.
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5002", "--timeout", "300", \
+# 2 workers, long timeout: a max-res (grid 512) solid voxelization can take well over
+# 5 minutes on the pure-Python emitter, so 300s was killing legitimate large conversions.
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5002", "--timeout", "1800", \
      "--chdir", "/app/webapp", "app:app"]

@@ -22,9 +22,10 @@ docker compose down                             # stop
 ```
 
 Tuning (in `docker-compose.yml`):
-- `OBJTODU_MAX_VOXELS` — peak-RAM ceiling. 60M (~a few GB) is the default; raise it if your
-  PC has the memory, lower it if conversions get killed.
-- `mem_limit:` — uncomment to hard-cap the container's RAM (the OOM safety net).
+- `OBJTODU_MAX_VOXELS` — peak-RAM ceiling. Default is 134217728 (512^3, ~8.6 GB), the
+  largest grid the web UI's max_grid field will ever request; raise it if your PC has the
+  memory, lower it if conversions get killed.
+- `mem_limit:` — hard-caps the container's RAM (the OOM safety net); default 24g.
 
 ## Option B — plain Python (fastest to iterate on the code)
 
@@ -35,7 +36,7 @@ git checkout negative-octant-and-seams
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-export OBJTODU_MAX_VOXELS=60000000                  # Windows: set OBJTODU_MAX_VOXELS=60000000
+export OBJTODU_MAX_VOXELS=134217728                 # Windows: set OBJTODU_MAX_VOXELS=134217728
 cd webapp
 gunicorn -w 2 -b 0.0.0.0:5002 --timeout 300 app:app # or: python app.py  (dev server)
 # open http://localhost:5002
@@ -52,4 +53,5 @@ python obj_frontend.py ship.obj ship.blueprint --size L --fill 0.9 --smooth
   `OBJTODU_TEMPLATE` override the module/template locations if you rearrange things.
 - The Model-skeleton donor `exports/archive/3187_export.blueprint` ships in the repo; the
   emitter clones it (DU recomputes metadata on import), so no game files are needed.
-- Peak RAM ≈ `grid³` voxels × ~64 B. grid 391 ≈ 60M ≈ a few GB. Set the ceiling to taste.
+- Peak RAM ≈ `grid³` voxels × ~64 B. grid 512 (the UI's own max) ≈ 134M ≈ 8.6 GB. Set the
+  ceiling to taste.
