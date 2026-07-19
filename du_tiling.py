@@ -27,14 +27,18 @@ def smallest_core_for(extent_vox):
 
 def tile_voxels(voxels, core_vox):
     """Split a GLOBAL voxel set into per-core tiles. Returns {tile_ijk: local_voxel_set}
-    where local coords are within [0, core_vox). Tiling is by floor-division on each axis."""
+    where local coords are within [0, core_vox). Tiling is by floor-division on each axis.
+    `voxels` may be a compact (N,3) array or a Python set/iterable of triples -- the
+    min/floordiv/modulo are vectorized numpy either way; only the final per-tile grouping
+    (inherently a dict of sets) is a Python-level pass."""
+    import numpy as np
+    arr = voxels if isinstance(voxels, np.ndarray) else np.asarray(list(voxels), dtype=np.int64)
+    g = arr - arr.min(0)
+    t = g // core_vox
+    local = g % core_vox
     tiles = {}
-    lo = [min(v[i] for v in voxels) for i in range(3)]
-    for (x, y, z) in voxels:
-        gx, gy, gz = x - lo[0], y - lo[1], z - lo[2]
-        t = (gx // core_vox, gy // core_vox, gz // core_vox)
-        local = (gx % core_vox, gy % core_vox, gz % core_vox)
-        tiles.setdefault(t, set()).add(local)
+    for k, loc in zip(map(tuple, t.tolist()), local.tolist()):
+        tiles.setdefault(k, set()).add(tuple(loc))
     return tiles
 
 

@@ -13,6 +13,8 @@ your own voxelize_fn(verts, faces, grid)->set to try a different algorithm.
 """
 import os
 
+import numpy as np
+
 import du_voxelize as VX
 import obj_pipeline as P
 import du_envelope as E
@@ -24,8 +26,9 @@ CORE_ORIGIN = 8
 # (~64 B/voxel plus the grids), so grid^3 is the peak RAM. Cap the grid so the worst case
 # stays within budget and avoids the OOM that killed max-res on the shared server.
 #   - shared server (default): 5M voxels (grid ~171) ~= 0.5 GB, safe alongside the DU server.
-#   - local PC / Docker: raise it via OBJTODU_MAX_VOXELS (e.g. 60_000_000 for grid ~391)
-#     once you have the RAM -- the code is identical, only this ceiling changes.
+#   - local PC / Docker: raise it via OBJTODU_MAX_VOXELS (e.g. 134_217_728 for grid 512,
+#     the largest the web UI's max_grid field will ever request) once you have the RAM --
+#     the code is identical, only this ceiling changes.
 MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
 
 
@@ -65,14 +68,18 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness)
-    # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core
-    import numpy as np
-    sarr = np.asarray(list(solid), dtype=np.int64)
+    # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core.
+    # `solid` is already a compact (N,3) int64 coordinate array (VX.voxelize returns
+    # np.argwhere of a dense occupancy array, not a Python set -- see du_voxelize.voxelize
+    # for why: a solid shape can be ~all of grid^3, and materialising that as a Python set
+    # of tuples costs ~190B/entry vs ~24B/entry for a numpy row, a 100x+ blowup at grid 512+
+    # that was OOM-killing max-resolution conversions). Stays a compact array end to end --
+    # no set reconstruction here either.
+    sarr = solid.astype(np.int64, copy=False)
     lo = sarr.min(0); ex = sarr.max(0) - lo + 1
     d = tuple(int(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i])
               for i in range(3))
-    placed = sarr + np.array(d, np.int64)
-    voxels = set(map(tuple, placed.tolist()))
+    voxels = sarr + np.array(d, np.int64)
     smooth_fn = None
     if want_anchors and anchors:
         smooth_fn = VX.anchor_smooth_fn(anchors, delta=d)   # shifts key AND target by d
@@ -110,7 +117,12 @@ def preview_mesh(voxels, smooth_fn=None, deflect_cap=100 / 84.0):
     shared corners -- a faithful preview of what DU renders (its surface passes through the
     deflected voxel-corner vertices). Returns (flat_verts[x,y,z,...], flat_tris[i,j,k,...]),
     corners deduped so normals blend smoothly."""
-    V = voxels if isinstance(voxels, set) else set(voxels)
+    if isinstance(voxels, set):
+        V = voxels
+    elif isinstance(voxels, np.ndarray):
+        V = set(map(tuple, voxels.tolist()))    # rows aren't hashable -- tuple-ify first
+    else:
+        V = set(voxels)
     cidx = {}
     verts = []
     tris = []
@@ -173,11 +185,15 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
     grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth)
-    lo = [min(v[i] for v in solid) for i in range(3)]
-    solid = {(x - lo[0], y - lo[1], z - lo[2]) for (x, y, z) in solid}
+    # solid is a compact (N,3) int64 array (see voxelize_obj) -- shift with vectorized numpy,
+    # not a per-voxel Python loop/set-rebuild (this path can carry the same near-grid^3
+    # voxel counts as 'scale' mode, so the same blowup/slowdown applies here too).
+    lo = solid.min(0)
+    solid = solid - lo
     if smooth:
-        anchors = {(k[0] - lo[0], k[1] - lo[1], k[2] - lo[2]): v for k, v in anchors.items()}
-    extent = max(max(v[i] for v in solid) for i in range(3)) + 1
+        anchors = {(k[0] - int(lo[0]), k[1] - int(lo[1]), k[2] - int(lo[2])): v
+                   for k, v in anchors.items()}
+    extent = int(solid.max()) + 1 if len(solid) else 1
 
     if mode == 'auto':
         s = T.smallest_core_for(extent)
@@ -219,18 +235,21 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
 def _place_in_core(local, size, center=True):
     """Place a shape/tile's local voxels in the core build volume. Returns (voxels, delta).
     center=True centres the shape (single-construct default). center=False anchors the min
-    corner at 0 so full tiles fit and adjacent core constructs abut seamlessly."""
+    corner at 0 so full tiles fit and adjacent core constructs abut seamlessly. `local` may
+    be a compact (N,3) array (the 'auto' path's full solid) or a Python set (per-tile, already
+    core-bounded) -- either way the placement math is vectorized numpy, not a per-voxel loop."""
     import du_envelope as E
+    arr = local if isinstance(local, np.ndarray) else np.asarray(list(local), dtype=np.int64)
     core_vox = E.core_voxel_size(size)
-    ex = [max(v[i] for v in local) - min(v[i] for v in local) + 1 for i in range(3)]
-    lo = [min(v[i] for v in local) for i in range(3)]
+    lo = arr.min(0); ex = arr.max(0) - lo + 1
     if center:
         import obj_pipeline as P
         _, chunk0, _ = P.core_octree_params(size)
-        d = tuple(chunk0 + max(0, (core_vox - 2 * chunk0 - ex[i]) // 2) - lo[i] for i in range(3))
+        d = tuple(int(chunk0 + max(0, (core_vox - 2 * chunk0 - int(ex[i])) // 2) - lo[i])
+                  for i in range(3))
     else:
-        d = tuple(-lo[i] for i in range(3))          # min corner -> 0; tiles abut
-    return {(x + d[0], y + d[1], z + d[2]) for (x, y, z) in local}, d
+        d = tuple(int(-lo[i]) for i in range(3))      # min corner -> 0; tiles abut
+    return arr + np.array(d, np.int64), d
 
 
 if __name__ == '__main__':

@@ -306,9 +306,16 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     # shape). `place` overrides with an explicit per-axis cell offset (tiling: edge-align).
     import numpy as np
     anchor = chunk0 * 32
-    # order-independent (output is built from occupancy) -- no sort, just materialise
-    varr = (np.fromiter((c for v in voxels for c in v), np.int64, count=3 * len(voxels)).reshape(-1, 3)
-            if voxels else np.zeros((0, 3), np.int64))
+    # order-independent (output is built from occupancy) -- no sort, just materialise.
+    # `voxels` may already be a compact (N,3) numpy array (the 'scale' path via
+    # obj_frontend.voxelize_obj) -- use it directly instead of the per-voxel Python
+    # generator below, which is both slow and (for a numpy array) would crash on the
+    # `if voxels:` truth test (ambiguous for arrays with >1 element).
+    if isinstance(voxels, np.ndarray):
+        varr = voxels.astype(np.int64, copy=False) if len(voxels) else np.zeros((0, 3), np.int64)
+    else:
+        varr = (np.fromiter((c for v in voxels for c in v), np.int64, count=3 * len(voxels)).reshape(-1, 3)
+                if voxels else np.zeros((0, 3), np.int64))
     if len(varr):
         lo = varr.min(0); hix = varr.max(0)
         if place is None:

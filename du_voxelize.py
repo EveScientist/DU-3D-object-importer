@@ -564,9 +564,15 @@ def _scan_axis(verts, faces, grid, axis):
 
 
 def solid_by_containment(verts, faces, grid, robust=False):
-    """Mesh-tight solid (set of inside voxels): a voxel is filled iff its CENTRE is inside the
-    mesh (ray even-odd parity). The boundary sits ON the surface so smoothing deflections stay
+    """Mesh-tight solid occupancy: a voxel is filled iff its CENTRE is inside the mesh (ray
+    even-odd parity). The boundary sits ON the surface so smoothing deflections stay
     sub-voxel. Watertight meshes required for a correct interior.
+
+    Returns a DENSE (grid,grid,grid) bool array, not a coordinate set. A solid shape can
+    occupy close to 100% of grid^3; a Python set of int-tuples costs ~190 B/entry (measured)
+    vs 1 B/entry for a bool array, so materialising the set form at high resolution is what
+    was blowing memory past the guard's grid^3*64B estimate (grid 512 solid: ~22 GB as a
+    set vs ~134 MB dense -- and voxelize() below was building TWO such sets, doubling it).
 
     Ray perturbation makes a SINGLE z-scan robust (default). robust=True casts all 3 axes and
     majority-votes (>=2) -- kept as a fallback for pathological non-manifold meshes."""
@@ -576,8 +582,7 @@ def solid_by_containment(verts, faces, grid, robust=False):
                + _scan_axis(verts, faces, grid, 2)) >= 2
     else:
         occ = _scan_axis(verts, faces, grid, 2)
-    xs, ys, zs = np.nonzero(occ)
-    return set(zip(xs.tolist(), ys.tolist(), zs.tolist()))
+    return occ
 
 
 def _ray_z_hits(v0, v1, v2, px, py):
@@ -599,11 +604,14 @@ def _ray_z_hits(v0, v1, v2, px, py):
 def fill_solid(surface, grid):
     """Watertight interior via even-odd z-parity of surface crossings per (x,y) column.
     Robust to the conservative surface shell (collapses runs of adjacent surface voxels to
-    single crossings). Returns surface | interior."""
+    single crossings). Returns a DENSE (grid,grid,grid) bool array of surface | interior --
+    same representation as solid_by_containment, so voxelize() can merge either branch
+    uniformly without materialising a grid^3-scale Python set (see solid_by_containment)."""
+    occ = np.zeros((grid, grid, grid), bool)
     cols = {}
     for (x, y, z) in surface:
         cols.setdefault((x, y), []).append(z)
-    out = set(surface)
+        occ[x, y, z] = True
     for (x, y), zs in cols.items():
         zs = sorted(set(zs))
         # collapse contiguous runs -> crossing z-levels
@@ -617,9 +625,10 @@ def fill_solid(surface, grid):
         runs.append((s, p))
         # fill gaps between successive run PAIRS (inside/outside toggles at each run)
         for i in range(0, len(runs) - 1, 2):
-            for z in range(runs[i][1] + 1, runs[i + 1][0]):
-                out.add((x, y, z))
-    return out
+            lo_z, hi_z = runs[i][1] + 1, runs[i + 1][0]
+            if hi_z > lo_z:
+                occ[x, y, lo_z:hi_z] = True
+    return occ
 
 
 def _erode(occ, n):
@@ -635,24 +644,17 @@ def _erode(occ, n):
 
 
 def hollow_shell(solid, grid, thickness):
-    """Hollow a solid voxel set to a shell `thickness` voxels thick: shell = solid minus
-    (solid eroded by `thickness`). Where the shape is thinner than 2*thickness (sharp edges,
-    thin features) erosion clears it, so those regions stay SOLID -- the minimum never
-    over-thins genuine detail. thickness<=0 returns the solid unchanged."""
-    if thickness <= 0 or not solid:
+    """Hollow a DENSE (grid,grid,grid) solid occupancy array to a shell `thickness` voxels
+    thick: shell = solid minus (solid eroded by `thickness`). Where the shape is thinner than
+    2*thickness (sharp edges, thin features) erosion clears it, so those regions stay SOLID --
+    the minimum never over-thins genuine detail. thickness<=0 returns the solid unchanged.
+    Returns a dense array of the same (grid,grid,grid) shape as `solid`."""
+    if thickness <= 0 or not solid.any():
         return solid
-    lo = [min(v[i] for v in solid) for i in range(3)]
-    hi = [max(v[i] for v in solid) for i in range(3)]
-    p = 1                                          # False border so the outer surface erodes
-    dim = [hi[i] - lo[i] + 1 + 2 * p for i in range(3)]
-    occ = np.zeros(dim, bool)
-    for (x, y, z) in solid:
-        occ[x - lo[0] + p, y - lo[1] + p, z - lo[2] + p] = True
-    inner = _erode(occ, thickness)
-    shell = occ & ~inner
-    xs, ys, zs = np.nonzero(shell)
-    return {(int(xs[k]) + lo[0] - p, int(ys[k]) + lo[1] - p, int(zs[k]) + lo[2] - p)
-            for k in range(len(xs))}
+    padded = np.pad(solid, 1, mode='constant', constant_values=False)   # False border so
+    inner = _erode(padded, thickness)                                  # the outer surface erodes
+    shell = padded & ~inner
+    return shell[1:-1, 1:-1, 1:-1]
 
 
 def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
@@ -671,7 +673,14 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         regions genuinely thinner than 2x this (sharp edges) stay solid, never over-thinned.
 
     Anchors ({surface corner -> nearest mesh point}) always come from the SAT surface pass
-    so the smoothing layer has a projection target for every boundary vertex."""
+    so the smoothing layer has a projection target for every boundary vertex.
+
+    Internally the solid/interior occupancy stays a DENSE (grid,grid,grid) bool array end to
+    end (see solid_by_containment) -- only the sparse SURFACE shell (bounded by mesh area,
+    not grid^3) is ever a Python set of tuples. The final return converts the dense result to
+    a compact (N,3) int64 coordinate array via np.argwhere (vectorized, no per-voxel Python
+    object churn), not a Python set -- for a solid shape N can be ~all of grid^3, and a
+    coordinate array costs ~24 B/entry vs ~190 B/entry for a set of tuples."""
     cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
     surface, anchors = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
                                         cnormals=cn)
@@ -679,15 +688,26 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
     if solid_mode == 'contain':
         contain = solid_by_containment(verts, faces, grid)
-        if contain:
+        if contain.any():
             # add ONLY surface voxels with NO containment voxel nearby -- i.e. thin sheets/
             # fins the interior sampler dropped. Surface voxels hugging a thick boundary have
             # a containment neighbour and are skipped, so thick solids keep their TIGHT
             # boundary (sharp edges reachable within the +-1.19 vox deflection clamp).
-            nb = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
-            thin = {v for v in surface if v not in contain
-                    and not any((v[0]+a, v[1]+b, v[2]+c) in contain for a, b, c in nb)}
-            solid = contain | thin
+            # Padded so neighbour lookups never need per-voxel bounds checks; the check is
+            # against the PRISTINE contain array (collect first, apply after, matching the
+            # old contain | thin set-union semantics -- must not see its own additions).
+            padded = np.pad(contain, 1, mode='constant', constant_values=False)
+            thin = []
+            for (x, y, z) in surface:
+                px, py, pz = x + 1, y + 1, z + 1
+                if not padded[px, py, pz] and not (
+                        padded[px + 1, py, pz] or padded[px - 1, py, pz] or
+                        padded[px, py + 1, pz] or padded[px, py - 1, pz] or
+                        padded[px, py, pz + 1] or padded[px, py, pz - 1]):
+                    thin.append((x, y, z))
+            for (x, y, z) in thin:
+                contain[x, y, z] = True
+            solid = contain
         else:
             solid = fill_solid(surface, grid)
     else:
@@ -695,9 +715,10 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     if hollow:
         # shell of at least min_thickness voxels (>=1). Thin features stay solid because
         # erosion clears them, so the minimum never over-thins sharp edges.
-        voxels = hollow_shell(solid, grid, max(1, min_thickness))
+        occ = hollow_shell(solid, grid, max(1, min_thickness))
     else:
-        voxels = solid
+        occ = solid
+    voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
     return voxels, anchors
 
 
