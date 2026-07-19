@@ -49,19 +49,48 @@ the content's ancestor chunk at level L (h5: a=2 → {1,2}³; h6: a=1 → {0,1}�
 content ancestor PLUS its lower-corner neighbour shell (content hugs the low corner of each
 coarse chunk at the standard local-8 placement).
 
-**RULE (matches all 8 data points):**
-- h3 (content) and h4 (immediate parent): always MINIMAL — the single ancestor chunk.
-- Level L ≥ 5: expand to the {a_L−1, a_L}³ block **iff N ≥ 2^(L−4)** (h5→N≥2, h6→N≥4).
-  The N=3 (3259, h6=1) vs N=4 (3240, h6=8) pair pins the h6 threshold exactly at 4.
-- h7 is the octree root (single chunk) — never expands.
+**PROVISIONAL RULE (low-corner only):** h3/h4 minimal; level L≥5 expands to {a_L−1, a_L}³
+iff N ≥ 2^(L−4). *** SUPERSEDED — see HIGH-CORNER MIRROR below. The 2^(L−4) threshold was an
+artifact of the low-corner placement; it does NOT hold in general. ***
 
-Predicts h7 would expand at N≥8 on a LARGER core (L core, where h7 isn't root) — untested.
-Neighbour DIRECTION (lower vs upper) is position-dependent: all probes hug the low corner, so
-they only show the lower neighbour. A centred/arbitrary shape (build_blueprint_sem centres
-content) needs the neighbour picked per-axis by which side the content hugs — one more probe
-set (content shifted to the HIGH corner of a coarse chunk) would confirm the mirror.
+Invariant that DID hold: h3 (content) and h4 (immediate parent) are ALWAYS minimal (the
+single ancestor chunk); h7 (M-core octree root) never expands. The expansion, when it
+happens, is always the 2×2×2 block {a_L−1, a_L}³ (lower neighbour) at the low corner.
 
-NOTE: the current emitter (octree_from_cells) emits only the MINIMAL ancestor tree and
-deploys fine (DU regenerates LOD content from h3 on import), so this shell is what DU
-*writes on export*, not what it *requires on import*. compute_lod_set can now reproduce DU's
-exact export set for QA/byte-matching if wanted.
+---
+
+## HIGH-CORNER MIRROR (2026-07-19) — Exports 3837/3839/3841/3843.
+
+Same cubes shifted +96 on every axis → content in h3 chunk (11,11,11) = the HIGH corner of
+the SAME h5 ancestor chunk (a_5 = 11>>2 = 2), opposite corner from the chunk-8 sweep.
+
+| Hn | export | N | h3 | h4 | h5 | h6 | h7 |
+|----|--------|---|----|----|----|----|----|
+| H1 | 3837   | 1 | (11,11,11) | (5,5,5) | **1** (2,2,2) | 1 | 1 |
+| H2 | 3839   | 2 | (11,11,11) | (5,5,5) | **1** (2,2,2) | 1 | 1 |
+| H5 | 3841   | 5 | (11,11,11) | (5,5,5) | **1** (2,2,2) | 1 | 1 |
+| H8 | 3843   | 8 | (11,11,11) | (5,5,5) | **8** {2,3}³   | 1 | 1 |
+
+**Two findings:**
+
+1. **DIRECTION is position-dependent — CONFIRMED.** At the high corner the h5 block is
+   {2,3}³ (a_5 plus the UPPER neighbour 3), the mirror of the low-corner {1,2}³ (a_5 plus the
+   LOWER neighbour 1). So the neighbour is on the side the content HUGS. A general
+   compute_lod_set must pick the neighbour per-axis by which side of each coarse chunk the
+   content's extent sits toward. (h6 stayed minimal here because chunk 11 is in the LOWER
+   half of its h6 chunk 1 and N was too small to trigger — an h6 mirror needs an L core with
+   an in-bounds upper h6 neighbour.)
+
+2. **THRESHOLD is asymmetric — the 2^(L−4) rule is REFUTED.** Low corner: h5 expands at N≥2.
+   High corner: h5 stays minimal through N=5 and only expands at N=8. Same ancestor chunk,
+   same level, opposite corner → wildly different N threshold. Note N=1 vs N=2 at the low
+   corner have IDENTICAL h5-cell footprints ({66}) yet different h5 neighbour sets, so the
+   decision uses finer-than-level detail (h3/h4 border cells), and the material +1 offset
+   breaks the low/high symmetry. The exact threshold is NOT yet pinned — it needs either the
+   DU create_lods source or a denser N×position sweep. DO NOT ship a compute_lod_set based on
+   2^(L−4).
+
+NOTE (unchanged): the emitter (octree_from_cells) emits only the MINIMAL ancestor tree and
+deploys fine — DU regenerates LOD content from h3 on import. So this whole neighbour shell is
+what DU *writes on export*, not what it *requires on import*; reproducing it is QA/byte-match
+only, hence low priority. The confirmed direction-mirror is the durable finding.
