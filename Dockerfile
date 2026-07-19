@@ -9,9 +9,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pipeline modules + the web app. .dockerignore keeps tests/exports/archive out.
+# Pipeline modules + the web app. .dockerignore keeps tests/ out and trims exports/
+# down to the one Model-skeleton template the emitter clones (build_blueprint_sem).
 COPY *.py ./
 COPY webapp/ ./webapp/
+COPY exports/ ./exports/
 
 # On a PC there is RAM to spare vs the old shared server -- lift the voxel ceiling.
 # grid ~391 (60M voxels) ~= a few GB; tune to your machine or override at `docker run`.
