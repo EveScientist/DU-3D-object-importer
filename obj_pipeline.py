@@ -9,8 +9,63 @@ Stage map:
 """
 import os
 import sys
+import multiprocessing
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import du_general as dg
+
+# Per-chunk emitter parallelism (build_blueprint_sem). Capped well under cpu_count by default
+# (not "one process per core"): fork() COW-maps the whole parent address space into every
+# worker, and CPython refcounting defeats COW on anything touched, so worker count multiplies
+# memory risk, not just speed -- see the del/gc.collect() before Pool() creation below.
+# OBJTODU_WORKERS overrides once you've verified your headroom. Only kicks in with
+# >= _PARALLEL_MIN_CHUNKS chunks (pool startup isn't worth it for small shapes) and only where
+# fork() exists (Linux/Docker) -- see _emit_chunk for why fork specifically is required.
+_PARALLEL_MIN_CHUNKS = 64
+_DEFAULT_MAX_WORKERS = 8
+
+
+def _n_workers():
+    n = os.environ.get('OBJTODU_WORKERS')
+    if n:
+        try:
+            return max(1, int(n))
+        except ValueError:
+            pass
+    return max(1, min(_DEFAULT_MAX_WORKERS, (os.cpu_count() or 2) - 1))
+
+
+# Set by build_blueprint_sem in the PARENT process before Pool() creation, so fork()'d
+# workers inherit it via copy-on-write -- nothing in here (notably pos_fn, a closure) ever
+# needs to be pickled across a process boundary. NOT thread-safe (fine: gunicorn's sync
+# workers are one-request-per-process, so this is never touched by two threads at once).
+_WORKER_CTX = None
+
+
+def _emit_chunk(hxyz):
+    """Build ONE blueprint LOD record dict for chunk key (h,x,y,z). Module-level (picklable
+    by reference, so multiprocessing.Pool can dispatch it) -- the actual shared inputs come
+    from _WORKER_CTX, not from arguments, so only this small tuple and the returned dict ever
+    cross the process boundary."""
+    import copy
+    import du_semantic
+    h, x, y, z = hxyz
+    ctx = _WORKER_CTX
+    e = copy.deepcopy(ctx['proto'])
+    e['h'] = h
+    for k, v in (('x', x), ('y', y), ('z', z)):
+        e[k] = {'$numberLong': v}
+    io = (32 * x, 32 * y, 32 * z)
+    if h == 3:
+        mo = du_semantic.mat_window(ctx['gocc'], ctx['glo'], ctx['gdim'], io)
+        body = du_semantic.build_cell(None, io, material=ctx['mat'], pos_fn=ctx['pos_fn'],
+                                      yseam_payload=ctx['yseam_payload'], matocc=mo)
+    else:
+        body = du_semantic.build_cell(set(), io,
+            mapping=[(du_semantic.MAT_DEBUG1[0], du_semantic.MAT_DEBUG1[1], 1)])
+    b64, hsh = _encode_body(body)
+    e['records']['voxel']['data']['$binary'] = b64
+    e['records']['voxel']['hash']['$numberLong'] = hsh
+    return e
 
 
 def solid_fill_z(surface_voxels):
@@ -179,7 +234,24 @@ def octree_from_cells(cells, core_h):
     arr = cells if isinstance(cells, np.ndarray) else np.asarray(list(cells))
     if len(arr) == 0:
         return set()
-    leaves = {(int(a), int(b), int(c)) for a, b, c in np.unique((arr + 1) // 32, axis=0)}
+    # np.unique(..., axis=0) row-dedup is a structured-array sort and is dramatically slower
+    # than a 1D unique -- measured 242s for 134M rows (grid 512) vs 8.5s for the equivalent
+    # via this int64-key encode/decode (21 bits/axis is far beyond any real chunk-space
+    # extent, so the encoding is lossless; verified byte-identical results on real data).
+    lc = (arr + 1) // 32
+    lo3 = lc.min(axis=0)
+    sh = lc - lo3
+    BITS = 21
+    key = ((sh[:, 0].astype(np.int64) << (2 * BITS))
+           | (sh[:, 1].astype(np.int64) << BITS)
+           | sh[:, 2].astype(np.int64))
+    ukey = np.unique(key)
+    mask = (1 << BITS) - 1
+    ux = (ukey >> (2 * BITS)) & mask
+    uy = (ukey >> BITS) & mask
+    uz = ukey & mask
+    leaves = {(int(ux[i] + lo3[0]), int(uy[i] + lo3[1]), int(uz[i] + lo3[2]))
+              for i in range(len(ukey))}
     want = {(3,) + c for c in leaves}
     for L in range(4, core_h + 1):
         shift = L - 3
@@ -352,32 +424,47 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     # single root h(core_h); DU regenerates LOD content from h3 (phantoms unneeded).
     want = octree_from_cells(abs_arr, core_h)
     gocc, glo, gdim = du_semantic.global_occupancy(abs_arr)   # slice windows O(1)/chunk
-    entries = []
-    for (h, x, y, z) in sorted(want):
-        e = copy.deepcopy(proto)
-        e['h'] = h
-        for k, v in (('x', x), ('y', y), ('z', z)):
-            e[k] = {'$numberLong': v}
-        io = (32 * x, 32 * y, 32 * z)
-        if h == 3:
-            mo = du_semantic.mat_window(gocc, glo, gdim, io)
-            body = du_semantic.build_cell(None, io, material=mat, pos_fn=pos_fn,
-                                          yseam_payload=yseam_payload, matocc=mo)
-        else:
-            body = du_semantic.build_cell(set(), io,
-                mapping=[(du_semantic.MAT_DEBUG1[0], du_semantic.MAT_DEBUG1[1], 1)])
-        b64, hsh = _encode_body(body)
-        e['records']['voxel']['data']['$binary'] = b64
-        e['records']['voxel']['hash']['$numberLong'] = hsh
-        entries.append(e)
     # real Model.Bounds from the material-cell bbox (voxel+1), /4 world units -- DU anchors
-    # placement to these; a placeholder box (old bug) deployed the construct offset.
+    # placement to these; a placeholder box (old bug) deployed the construct offset. Computed
+    # here (not after the entries loop) so abs_arr/varr can be freed before the fork below.
     if len(abs_arr):
         mnb = tuple(int(abs_arr[:, i].min()) + 1 for i in range(3))
         mxb = tuple(int(abs_arr[:, i].max()) + 1 for i in range(3))
         bbox = (mnb, mxb)
     else:
         bbox = None
+    chunk_list = sorted(want)
+    n_workers = _n_workers()
+    use_pool = (n_workers > 1 and len(chunk_list) >= _PARALLEL_MIN_CHUNKS
+                and 'fork' in multiprocessing.get_all_start_methods())
+    global _WORKER_CTX
+    _WORKER_CTX = dict(proto=proto, gocc=gocc, glo=glo, gdim=gdim, mat=mat,
+                       pos_fn=pos_fn, yseam_payload=yseam_payload)
+    try:
+        if use_pool:
+            # fork (not spawn/forkserver): pos_fn is a closure and can't be pickled, but a
+            # fork()'d child inherits _WORKER_CTX via copy-on-write, so it never has to be --
+            # only the small (h,x,y,z) task tuples and the returned record dicts cross the
+            # process boundary. Windows/macOS-spawn-default hosts fall through to the serial
+            # loop below (still correct, just single-core).
+            #
+            # fork() COW-maps the WHOLE parent address space into every child, not just
+            # _WORKER_CTX -- and CPython refcounting writes to an object's header on every
+            # touch, which is a well-known COW-defeater. varr/abs_arr/voxels can be multi-GB
+            # for a dense high-res shape and aren't needed past this point (gocc is a separate
+            # array already derived from abs_arr), so drop them and force a collection before
+            # forking N workers -- otherwise N copies of "mostly untouched but still resident"
+            # multi-GB arrays is exactly the OOM this whole fix exists to prevent.
+            del varr, abs_arr, voxels
+            import gc
+            gc.collect()
+            ctx = multiprocessing.get_context('fork')
+            with ctx.Pool(min(n_workers, len(chunk_list))) as pool:
+                entries = pool.map(_emit_chunk, chunk_list)
+        else:
+            entries = [_emit_chunk(k) for k in chunk_list]
+    finally:
+        _WORKER_CTX = None
     out = du_envelope.build_envelope(entries, size=size, core_type=core_type, name=name,
                                      bbox=bbox)
     json.dump(out, open(out_path, 'w'))
