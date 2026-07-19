@@ -10,7 +10,12 @@ import tempfile
 import traceback
 import uuid
 
-sys.path.insert(0, '/home/du')
+# Find the pipeline modules (du_*.py / obj_frontend.py). In the git repo they live in the
+# repo root, one level up from this webapp/ folder; OBJTODU_PIPELINE overrides for other
+# layouts (e.g. the live server, which historically kept them in /home/du).
+_here = os.path.dirname(os.path.abspath(__file__))
+_pipeline = os.environ.get('OBJTODU_PIPELINE', os.path.dirname(_here))
+sys.path.insert(0, _pipeline)
 
 from flask import Flask, request, send_file, render_template, jsonify
 

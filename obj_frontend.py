@@ -11,12 +11,22 @@ objtodu.evescientist.net calls.
 The voxelizer (obj_to_du_voxels.voxelize, surface SAT) is intentionally SWAPPABLE -- pass
 your own voxelize_fn(verts, faces, grid)->set to try a different algorithm.
 """
+import os
+
 import du_voxelize as VX
 import obj_pipeline as P
 import du_envelope as E
 
 # Core build volume starts at voxel 8 (the (8,8,8) chunk-0 origin in construct-local coords).
 CORE_ORIGIN = 8
+
+# Peak-RAM guard: a solid shape is up to grid^3 voxels held as a set of tuples + numpy grids
+# (~64 B/voxel plus the grids), so grid^3 is the peak RAM. Cap the grid so the worst case
+# stays within budget and avoids the OOM that killed max-res on the shared server.
+#   - shared server (default): 5M voxels (grid ~171) ~= 0.5 GB, safe alongside the DU server.
+#   - local PC / Docker: raise it via OBJTODU_MAX_VOXELS (e.g. 60_000_000 for grid ~391)
+#     once you have the RAM -- the code is identical, only this ceiling changes.
+MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
 
 
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
@@ -43,6 +53,14 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
         print(f"[obj] grid {grid} capped to {max_grid} for performance "
               f"(pass max_grid= to raise; fills {100*max_grid//core_vox}% of the {size} core)")
         grid = max_grid
+    # MEMORY guard: a solid shape holds up to grid^3 voxels; stored as a Python set of
+    # tuples (~64 B each) plus numpy grids, this is the peak RAM. Cap the grid so the
+    # worst case stays within a server-safe budget (avoids the OOM that killed max-res).
+    if grid ** 3 > MAX_SOLID_VOXELS:
+        safe = int(MAX_SOLID_VOXELS ** (1.0 / 3))
+        print(f"[obj] grid {grid} capped to {safe} to stay within the memory budget "
+              f"(~{MAX_SOLID_VOXELS // 1_000_000}M voxels)")
+        grid = safe
     verts, faces = VX.load_mesh(obj_path)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,

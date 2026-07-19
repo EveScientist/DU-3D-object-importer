@@ -7,8 +7,9 @@ Stage map:
   voxels {(x,y,z)}  --solid_fill-->  solid voxels  --to_columns-->  cols {(x,y):[(zlo,zhi)..]}
   cols  --build_multichunk-->  {(cx,cy,cz): scan}  --assemble-->  blueprint JSON
 """
+import os
 import sys
-sys.path.insert(0, '/home/du')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import du_general as dg
 
 
@@ -272,7 +273,13 @@ def _scan_mc(scan):
                          "use du_general.LAST_MC from the build")
     return 512+P['mat']
 
-TEMPLATE_M = '/home/du/exports/archive/3187_export.blueprint'
+# Model-skeleton donor: build_blueprint_sem clones VoxelData[0] from it (core-size-independent;
+# DU recomputes meta on import). Resolved relative to this module so a fresh clone / container
+# works with no absolute paths; OBJTODU_TEMPLATE overrides if you relocate it.
+TEMPLATE_M = os.environ.get(
+    'OBJTODU_TEMPLATE',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'exports', 'archive',
+                 '3187_export.blueprint'))
 
 
 def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=True,

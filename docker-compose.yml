@@ -1,0 +1,18 @@
+# Run the converter on your PC alongside the DU server container.
+#   docker compose up -d --build      # build + start, http://localhost:5002
+#   docker compose logs -f            # watch conversions
+#   docker compose down               # stop
+services:
+  objtodu:
+    build: .
+    image: objtodu:latest
+    container_name: objtodu
+    ports:
+      - "5002:5002"
+    environment:
+      # Raise/lower to match your PC's RAM. 60M ~= a few GB peak per conversion.
+      OBJTODU_MAX_VOXELS: "60000000"
+    # Optional hard cap so a runaway conversion can't take the whole PC down
+    # (the OOM lesson from the shared server). Uncomment and set to taste:
+    # mem_limit: 8g
+    restart: unless-stopped

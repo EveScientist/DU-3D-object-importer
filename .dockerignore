@@ -1,0 +1,12 @@
+.git
+__pycache__
+*.pyc
+tests/
+PROBES/
+archive/
+*.md
+# Exclude the bulky exports/ EXCEPT the one Model-skeleton template the emitter clones.
+exports/*
+!exports/archive/
+exports/archive/*
+!exports/archive/3187_export.blueprint
