@@ -20,7 +20,31 @@ Design notes:
   * The anchor map is what makes "forcibly smooth a jagged curve" cheap and exact.
 """
 import math
+import os
+import multiprocessing
 import numpy as np
+
+# Parallelism for _scan_axis's outer `a` loop (see below) -- same env var / default cap as
+# obj_pipeline.py's emitter pool, so one knob controls both.
+_SCAN_PARALLEL_MIN_A = 64
+_DEFAULT_MAX_WORKERS = 8
+
+
+def _n_workers():
+    n = os.environ.get('OBJTODU_WORKERS')
+    if n:
+        try:
+            return max(1, int(n))
+        except ValueError:
+            pass
+    return max(1, min(_DEFAULT_MAX_WORKERS, (os.cpu_count() or 2) - 1))
+
+
+# Set by _scan_axis in the PARENT process before Pool() creation, so fork()'d workers inherit
+# it via copy-on-write instead of needing it pickled. Unlike obj_pipeline's _WORKER_CTX, the
+# shared data here (v0/v1/v2/amin/amax) is proportional to face count, not grid^3, so it's
+# small even for complex meshes -- no del/gc.collect() dance needed before forking.
+_SCAN_CTX = None
 
 
 def load_obj(path):
@@ -518,25 +542,16 @@ def _accumulate_anchors(anchors, v0, v1, v2, ix, iy, iz, tn=None):
             anchors[key] = ((float(T[k, 0]), float(T[k, 1]), float(T[k, 2])), dk)
 
 
-def _scan_axis(verts, faces, grid, axis):
-    """Inside-voxel occupancy (bool grid^3, ORIGINAL frame) by casting rays ALONG `axis`
-    through each cell centre of the other two axes, even-odd parity. Fills each inside run
-    with a numpy SLICE (no per-voxel Python)."""
-    p = [i for i in range(3) if i != axis] + [axis]     # ray axis last
-    inv = [p.index(i) for i in range(3)]
-    V = verts[:, p]
-    v0 = V[faces[:, 0]]; v1 = V[faces[:, 1]]; v2 = V[faces[:, 2]]
-    amin = np.minimum(np.minimum(v0, v1), v2)
-    amax = np.maximum(np.maximum(v0, v1), v2)
-    # Perturb the ray by tiny INCOMMENSURATE irrationals so it never passes exactly through a
-    # shared edge / vertex / coplanar ring (the equatorial "knife cut"). Sub-voxel -> the
-    # inside/outside classification is unchanged, but grazes become measure-zero, which makes
-    # a SINGLE axis robust (the old 3-axis majority vote is no longer needed).
-    EA = 1e-3 * math.sqrt(2)
-    EB = 1e-3 * math.sqrt(3)
-    occ = np.zeros((grid, grid, grid), bool)            # permuted [a, b, c]
-    a_lo = max(0, int(math.floor(amin[:, 0].min())))
-    a_hi = min(grid, int(math.ceil(amax[:, 0].max())) + 1)
+def _scan_a_range(a_range):
+    """Compute occ[a_lo:a_hi, :, :] (relative-indexed, shape (a_hi-a_lo, grid, grid)) for one
+    contiguous slice of _scan_axis's outer `a` loop. Module-level (picklable by reference) so
+    a multiprocessing.Pool can dispatch it; the actual mesh data comes from _SCAN_CTX, not
+    arguments -- see _scan_axis for why (fork/copy-on-write sharing, not pickling)."""
+    a_lo, a_hi = a_range
+    ctx = _SCAN_CTX
+    v0, v1, v2, amin, amax = ctx['v0'], ctx['v1'], ctx['v2'], ctx['amin'], ctx['amax']
+    grid, EA, EB = ctx['grid'], ctx['EA'], ctx['EB']
+    occ = np.zeros((a_hi - a_lo, grid, grid), bool)
     for a in range(a_lo, a_hi):
         pa = a + 0.5 + EA
         ma = (amin[:, 0] <= pa) & (pa <= amax[:, 0])
@@ -559,7 +574,56 @@ def _scan_axis(verts, faces, grid, axis):
                 c0 = max(0, int(math.ceil(cs[i] - 0.5)))
                 c1 = min(grid - 1, int(math.floor(cs[i + 1] - 0.5)))
                 if c1 >= c0:
-                    occ[a, b, c0:c1 + 1] = True
+                    occ[a - a_lo, b, c0:c1 + 1] = True
+    return occ
+
+
+def _scan_axis(verts, faces, grid, axis):
+    """Inside-voxel occupancy (bool grid^3, ORIGINAL frame) by casting rays ALONG `axis`
+    through each cell centre of the other two axes, even-odd parity. Fills each inside run
+    with a numpy SLICE (no per-voxel Python).
+
+    The outer `a` loop is embarrassingly parallel -- each `a` only ever writes its own
+    occ[a,:,:] slice -- and is the dominant cost at high resolution (measured ~70% of total
+    voxelize() time at grid 512, almost entirely in the per-(a,b) ray-triangle intersection).
+    Split across a process pool when there's enough work and fork() is available; falls back
+    to the plain loop otherwise (small shapes, or Windows/macOS-spawn hosts)."""
+    p = [i for i in range(3) if i != axis] + [axis]     # ray axis last
+    inv = [p.index(i) for i in range(3)]
+    V = verts[:, p]
+    v0 = V[faces[:, 0]]; v1 = V[faces[:, 1]]; v2 = V[faces[:, 2]]
+    amin = np.minimum(np.minimum(v0, v1), v2)
+    amax = np.maximum(np.maximum(v0, v1), v2)
+    # Perturb the ray by tiny INCOMMENSURATE irrationals so it never passes exactly through a
+    # shared edge / vertex / coplanar ring (the equatorial "knife cut"). Sub-voxel -> the
+    # inside/outside classification is unchanged, but grazes become measure-zero, which makes
+    # a SINGLE axis robust (the old 3-axis majority vote is no longer needed).
+    EA = 1e-3 * math.sqrt(2)
+    EB = 1e-3 * math.sqrt(3)
+    occ = np.zeros((grid, grid, grid), bool)            # permuted [a, b, c]
+    a_lo = max(0, int(math.floor(amin[:, 0].min())))
+    a_hi = min(grid, int(math.ceil(amax[:, 0].max())) + 1)
+    total_a = a_hi - a_lo
+    n_workers = _n_workers()
+    use_pool = (total_a >= _SCAN_PARALLEL_MIN_A and n_workers > 1
+                and 'fork' in multiprocessing.get_all_start_methods())
+    global _SCAN_CTX
+    _SCAN_CTX = dict(v0=v0, v1=v1, v2=v2, amin=amin, amax=amax, grid=grid, EA=EA, EB=EB)
+    try:
+        if use_pool:
+            n = min(n_workers, total_a)
+            bounds = np.linspace(a_lo, a_hi, n + 1).round().astype(int)
+            ranges = [(int(bounds[i]), int(bounds[i + 1]))
+                      for i in range(n) if bounds[i] < bounds[i + 1]]
+            ctx = multiprocessing.get_context('fork')
+            with ctx.Pool(len(ranges)) as pool:
+                parts = pool.map(_scan_a_range, ranges)
+            for (rlo, rhi), part in zip(ranges, parts):
+                occ[rlo:rhi] = part
+        else:
+            occ[a_lo:a_hi] = _scan_a_range((a_lo, a_hi))
+    finally:
+        _SCAN_CTX = None
     return np.transpose(occ, inv)                        # back to original frame
 
 
