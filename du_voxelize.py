@@ -792,8 +792,158 @@ def hollow_shell(solid, grid, thickness):
     return shell[1:-1, 1:-1, 1:-1]
 
 
+def _closest_on_segment_pt(p, a, b):
+    """Closest point on segment [a,b] to point p (all (3,) arrays)."""
+    ab = b - a
+    denom = float(ab @ ab)
+    if denom < 1e-20:
+        return a
+    t = min(1.0, max(0.0, float((p - a) @ ab) / denom))
+    return a + t * ab
+
+
+def mesh_crease_features(verts, faces, crease_deg=35.0):
+    """Extract sharp FEATURES from mesh topology, in the SAME coord space as `verts`:
+      edges   -- (E,2,3) endpoints of crease edges: an edge shared by two faces whose normals
+                 diverge by more than crease_deg.
+      corners -- (C,3) feature points: welded vertices where >=3 crease edges meet, or where
+                 two crease edges bend (non-collinear).
+    These drive feature_snap_anchors so sharp non-axis-aligned edges/corners survive smoothing.
+
+    Robust to real exports: vertices are WELDED by position (coincident-but-duplicated
+    vertices -- a common exporter artifact -- otherwise break edge adjacency and fabricate
+    creases across a smooth surface, e.g. 120 phantom creases on a clean sphere), and
+    DEGENERATE (near-zero-area) faces are skipped (garbage normals). A boundary edge (one
+    incident face after welding) is NOT a crease -- a watertight solid has none, and a gap in
+    an imperfect mesh must not fabricate a sharp edge."""
+    from collections import defaultdict
+    if len(faces) == 0:
+        return np.zeros((0, 2, 3)), np.zeros((0, 3))
+    q = max(1e-9, 1e-5 * float(np.ptp(verts, axis=0).max()))
+    vkeys = np.round(verts / q).astype(np.int64)
+    canon = {}
+    vid_of = np.empty(len(verts), np.int64)
+    for i, k in enumerate(map(tuple, vkeys.tolist())):
+        vid_of[i] = canon.setdefault(k, len(canon))
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]],
+                  verts[faces[:, 2]] - verts[faces[:, 0]])
+    ln = np.linalg.norm(fn, axis=1)
+    unit = fn / np.where(ln[:, None] < 1e-20, 1.0, ln[:, None])
+    degenerate = ln < 1e-9
+    e2f = defaultdict(list)                            # welded undirected edge -> face indices
+    for fi in range(len(faces)):
+        if degenerate[fi]:
+            continue
+        a, b, c = int(vid_of[faces[fi, 0]]), int(vid_of[faces[fi, 1]]), int(vid_of[faces[fi, 2]])
+        for u, v in ((a, b), (b, c), (c, a)):
+            if u != v:
+                e2f[(u, v) if u < v else (v, u)].append(fi)
+    pos_of = {}                                        # welded vid -> a representative position
+    for i in range(len(verts)):
+        pos_of.setdefault(int(vid_of[i]), verts[i])
+    cos_c = math.cos(math.radians(crease_deg))
+    crease_edges = []
+    vce = defaultdict(list)
+    for (u, v), fis in e2f.items():
+        if len(fis) == 2 and float(unit[fis[0]] @ unit[fis[1]]) < cos_c:
+            crease_edges.append((u, v))
+            vce[u].append(v); vce[v].append(u)
+    edges = (np.array([(pos_of[u], pos_of[v]) for u, v in crease_edges], float)
+             if crease_edges else np.zeros((0, 2, 3)))
+    corner_vids = []
+    for vid, others in vce.items():
+        if len(others) >= 3:
+            corner_vids.append(vid); continue
+        if len(others) == 2:
+            d0 = pos_of[others[0]] - pos_of[vid]; d1 = pos_of[others[1]] - pos_of[vid]
+            n0 = float(np.linalg.norm(d0)) or 1.0; n1 = float(np.linalg.norm(d1)) or 1.0
+            if abs(float((d0 / n0) @ (d1 / n1))) < 0.999:      # bend -> corner
+                corner_vids.append(vid)
+    corners = (np.array([pos_of[i] for i in corner_vids], float)
+               if corner_vids else np.zeros((0, 3)))
+    return edges, corners
+
+
+def feature_snap_anchors(anchors, edges, corners, radius):
+    """Override each surface-corner anchor whose nearest crease FEATURE is within `radius`:
+    snap its smoothing target to the crease CORNER point (priority) or the nearest point on a
+    crease EDGE segment. Without this, the anchor target is nearest-point-on-nearest-triangle,
+    which lands on a single FACE -- so a sharp non-axis-aligned edge is reconstructed as a
+    rounded, jagged band across the two faces (axis-aligned edges are immune: they already lie
+    on voxel-corner lines with zero deflection). Snapping the ~1-voxel ring of corners around
+    the feature onto the feature itself restores the crease within the +-1.19 vox clamp.
+
+    Spatially indexed (creases are sparse, radius ~1 vox) and DETERMINISTIC (nearest feature,
+    ties by kind then index) so it doesn't depend on the parallelized surface pass's ordering.
+    anchors keys are integer voxel corners, values (target, d2); returns a new dict."""
+    if not anchors or (len(edges) == 0 and len(corners) == 0):
+        return anchors
+    r2 = radius * radius
+    # Coarse spatial hash of anchor corners so each feature only tests nearby anchors -- a
+    # dense-crease mesh (thousands of long edges) otherwise spends all its time on empty-cell
+    # lookups along the edges (grid-512-scale: minutes). Bucket size 2 ~ the radius.
+    from collections import defaultdict
+    B = 2
+    buckets = defaultdict(list)
+    for key in anchors:
+        buckets[(key[0] // B, key[1] // B, key[2] // B)].append(key)
+    # a corner within `radius` of a feature is at most ceil(radius) voxels away -> +-1 bucket
+    # (bucket=2 vox covers that), so Rb = ceil(radius/B) buckets each side is exact coverage.
+    Rb = int(math.ceil(radius / B))
+    boff = tuple(range(-Rb, Rb + 1))
+    best = {}                                         # key -> (d2, kind, idx, target)
+
+    def consider(key, d2, kind, idx, target):
+        if d2 <= r2:
+            cur = best.get(key)
+            if cur is None or (d2, kind, idx) < (cur[0], cur[1], cur[2]):
+                best[key] = (d2, kind, idx, target)
+
+    for ci in range(len(corners)):                    # crease CORNER points (kind 0, priority)
+        px, py, pz = float(corners[ci][0]), float(corners[ci][1]), float(corners[ci][2])
+        cb = (int(math.floor(px)) // B, int(math.floor(py)) // B, int(math.floor(pz)) // B)
+        tgt = (px, py, pz)
+        for dx in boff:
+            for dy in boff:
+                for dz in boff:
+                    for key in buckets.get((cb[0]+dx, cb[1]+dy, cb[2]+dz), ()):
+                        d2 = (px-key[0])**2 + (py-key[1])**2 + (pz-key[2])**2
+                        consider(key, d2, 0, ci, tgt)
+    for ei in range(len(edges)):                      # crease EDGE segments (kind 1)
+        ax, ay, az = float(edges[ei,0,0]), float(edges[ei,0,1]), float(edges[ei,0,2])
+        abx, aby, abz = float(edges[ei,1,0])-ax, float(edges[ei,1,1])-ay, float(edges[ei,1,2])-az
+        denom = abx*abx + aby*aby + abz*abz or 1.0
+        steps = max(1, int(math.ceil(math.sqrt(denom) / B)))
+        seen = set()                                  # per-edge bucket dedup (steps overlap)
+        for s in range(steps + 1):
+            t = s / steps
+            cb = (int(math.floor(ax+abx*t)) // B, int(math.floor(ay+aby*t)) // B,
+                  int(math.floor(az+abz*t)) // B)
+            for dx in boff:
+                for dy in boff:
+                    for dz in boff:
+                        bk = (cb[0]+dx, cb[1]+dy, cb[2]+dz)
+                        if bk in seen:
+                            continue
+                        seen.add(bk)
+                        for key in buckets.get(bk, ()):
+                            if key in best and best[key][1] == 0:
+                                continue              # already claimed by a corner (priority)
+                            tt = ((key[0]-ax)*abx + (key[1]-ay)*aby + (key[2]-az)*abz) / denom
+                            tt = 0.0 if tt < 0.0 else (1.0 if tt > 1.0 else tt)
+                            qx, qy, qz = ax+abx*tt, ay+aby*tt, az+abz*tt
+                            d2 = (qx-key[0])**2 + (qy-key[1])**2 + (qz-key[2])**2
+                            consider(key, d2, 1, ei, (qx, qy, qz))
+    if not best:
+        return anchors
+    out = dict(anchors)
+    for key, (d2, kind, idx, target) in best.items():
+        out[key] = (target, d2)
+    return out
+
+
 def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
-             smooth_normals=True, min_thickness=0, crease_deg=35.0):
+             smooth_normals=True, min_thickness=0, crease_deg=35.0, preserve_features=True):
     """Full voxelization -> (voxels, anchors).
 
     solid_mode='contain' (default): mesh-tight interior (center-in-mesh z-parity) UNIONED
@@ -821,6 +971,12 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
                                         cnormals=cn)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
+    if want_anchors and preserve_features and anchors:
+        # Feature preservation: snap the anchor ring around each sharp crease onto the crease
+        # itself, so non-axis-aligned edges/corners stay sharp instead of rounding onto a face
+        # (see feature_snap_anchors). radius = the +-1.19 vox deflection clamp (100/84).
+        edges, corners = mesh_crease_features(verts, faces, crease_deg)
+        anchors = feature_snap_anchors(anchors, edges, corners, radius=100.0 / 84.0)
     if solid_mode == 'contain':
         contain = solid_by_containment(verts, faces, grid)
         if contain.any():
