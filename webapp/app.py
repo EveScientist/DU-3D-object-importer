@@ -25,10 +25,18 @@ import du_envelope as E
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024      # 64 MB upload cap
 
-CORE_SIZES = list(E.CORE_SIZES)                           # XS .. XXXXXL
+CORE_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL']           # cap at XXL (XXXL+ impractical)
 CORE_TYPES = ['static', 'dynamic', 'space']
 WORKDIR = '/tmp/objtodu'
 os.makedirs(WORKDIR, exist_ok=True)
+
+# Interactive-preview grid ceiling. Voxelization is now parallelized (fork pools), so the old
+# grid-96 cap -- set when a serial grid-160 preview took ~19s -- is over-conservative. 160 is
+# ~2.7x the detail of 96 at ~9 MB payload / ~3 s preview_mesh (the remaining single-threaded
+# cost). Raise via OBJTODU_PREVIEW_CAP on a fast local box; payload/mesh time scale ~linearly
+# with grid, so 192 ~= 11 MB / ~4 s. (The DOWNLOAD still uses the full max_grid; this caps the
+# live preview only.)
+PREVIEW_CAP = int(os.environ.get('OBJTODU_PREVIEW_CAP') or 160)
 
 
 @app.route('/')
@@ -52,11 +60,13 @@ def _opts(form):
     size = form.get('size', 'M').upper()
     core_type = form.get('core_type', 'static')
     return dict(
-        size=size if size in E.CORE_SIZES else 'M',
+        size=size if size in CORE_SIZES else 'M',
         core_type=core_type if core_type in CORE_TYPES else 'static',
         mode=form.get('mode', 'scale'),
         hollow=form.get('hollow') == 'on',
         smooth=form.get('smooth') == 'on',
+        rotate_to_z_up=form.get('rotate_to_z_up') != 'off',  # default on
+        crease_deg=min(max(_f('crease_deg', 35.0), 5.0), 80.0),  # snappiness: 5-80°
         fill=min(max(_f('fill', 0.9), 0.05), 1.0),
         max_grid=min(max(_i('max_grid', 256), 32), 512),
         min_thickness=min(max(_i('min_thickness', 2), 1), 16),
@@ -76,13 +86,14 @@ def preview():
     obj_path = os.path.join(WORKDIR, f'{token}_pv{_ext}')
     up.save(obj_path)
     try:
-        # preview at the DOWNLOAD resolution, capped for a snappy interactive re-render
-        # (payload/time scale with surface area; 160 made dense shapes 8MB/19s -> hung).
-        pv_cap = 96
+        # preview at the DOWNLOAD resolution, capped (PREVIEW_CAP / OBJTODU_PREVIEW_CAP) for a
+        # snappy interactive re-render -- payload + preview_mesh time scale with surface area.
+        pv_cap = PREVIEW_CAP
         pv_grid = min(o['max_grid'], pv_cap)
         voxels, smooth_fn = F.voxelize_obj(
             obj_path, size=o['size'], fill_fraction=o['fill'], hollow=o['hollow'],
-            want_anchors=o['smooth'], max_grid=pv_grid, min_thickness=o['min_thickness'])
+            want_anchors=o['smooth'], max_grid=pv_grid, min_thickness=o['min_thickness'],
+            rotate_to_z_up=o['rotate_to_z_up'], crease_deg=o['crease_deg'])
         verts, tris = F.preview_mesh(voxels, smooth_fn if o['smooth'] else None)
         full = min(int(round(E.core_build_voxels(o['size']) * o['fill'])), o['max_grid'])
         return jsonify(v=[round(x, 3) for x in verts], f=tris,
@@ -111,6 +122,7 @@ def convert():
     size, core_type, mode = o['size'], o['core_type'], o['mode']
     hollow, smooth = o['hollow'], o['smooth']
     fill, max_grid, min_thickness = o['fill'], o['max_grid'], o['min_thickness']
+    rotate_to_z_up, crease_deg = o['rotate_to_z_up'], o['crease_deg']
 
     stem = os.path.splitext(os.path.basename(up.filename))[0][:40] or 'model'
     token = uuid.uuid4().hex[:8]
@@ -129,7 +141,8 @@ def convert():
         else:
             F.obj_to_blueprint(obj_path, out_path, size=size, core_type=core_type,
                                fill_fraction=fill, hollow=hollow, smooth=smooth,
-                               name=stem, max_grid=max_grid, min_thickness=min_thickness)
+                               name=stem, max_grid=max_grid, min_thickness=min_thickness,
+                               rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
             produced = out_path
         return send_file(produced, as_attachment=True,
                          download_name=f'{stem}_{size}.blueprint',

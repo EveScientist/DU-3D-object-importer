@@ -33,10 +33,11 @@ MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
 
 
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
-                 grid=None, want_anchors=False, max_grid=256, min_thickness=2):
+                 grid=None, want_anchors=False, max_grid=256, min_thickness=2,
+                 rotate_to_z_up=True, crease_deg=35.0):
     """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
 
-    size           core size name (XS..XXXXXL); sets the voxel resolution unless `grid`.
+    size           core size name (XS..XXL); sets the voxel resolution unless `grid`.
     fill_fraction  fraction of the core edge the longest mesh axis fills (0<f<=1) --
                    the SCALING control the user picks.
     grid           override: absolute voxel resolution of the longest mesh axis.
@@ -44,6 +45,10 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
                    True = surface shell only.
     want_anchors   also return a smooth_fn projecting each surface vertex to the nearest
                    mesh point (the "forcibly smooth a jagged edge" deflection), else None.
+    rotate_to_z_up rotate the mesh 90° about X-axis (most OBJ/STL are Y-up, DU is Z-up);
+                   applied before voxelizing so all downstream logic is consistent.
+    crease_deg    edge-sharpness threshold: faces diverging > this angle are crease-snapped
+                  (lower = catches gentler edges, 10-60 range typical; default 35).
     """
     core_vox = E.core_build_voxels(size)          # true voxel resolution (4x world size)
     if grid is None:
@@ -65,9 +70,15 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
               f"(~{MAX_SOLID_VOXELS // 1_000_000}M voxels)")
         grid = safe
     verts, faces = VX.load_mesh(obj_path)
+    # rotate Y-up (OBJ/STL convention) to Z-up (DU convention): 90° about X-axis.
+    # R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]] maps (x,y,z) -> (x,-z,y) -- stands up Y-tall
+    # shapes and doesn't mirror (180° rotation avoids handedness flip vs naive swap).
+    if rotate_to_z_up:
+        verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
-                                 want_anchors=want_anchors, min_thickness=min_thickness)
+                                 want_anchors=want_anchors, min_thickness=min_thickness,
+                                 crease_deg=crease_deg)
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core.
     # `solid` is already a compact (N,3) int64 coordinate array (VX.voxelize returns
     # np.argwhere of a dense occupancy array, not a Python set -- see du_voxelize.voxelize
@@ -88,12 +99,13 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
                      hollow=False, smooth=False, grid=None, name=None, material=None,
-                     max_grid=256, min_thickness=2):
+                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
     onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
     voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
-                                     max_grid=max_grid, min_thickness=min_thickness)
+                                     max_grid=max_grid, min_thickness=min_thickness,
+                                     rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
@@ -151,7 +163,7 @@ def preview_mesh(voxels, smooth_fn=None, deflect_cap=100 / 84.0):
 
 def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='static',
                       resolution=None, fill_fraction=0.9, hollow=False, smooth=False,
-                      name=None, material=None):
+                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0):
     """Unified entry: .obj -> one or many blueprints, by mode.
 
       mode='scale' : scale the mesh to fit the SPECIFIED `size` core (fill_fraction). One
@@ -176,15 +188,19 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
             size = 'M'
         n, want = obj_to_blueprint(obj_path, out_base + '.blueprint', size=size,
                                    core_type=core_type, fill_fraction=fill_fraction,
-                                   hollow=hollow, smooth=smooth, name=name, material=material)
+                                   hollow=hollow, smooth=smooth, name=name, material=material,
+                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
         return dict(mode='scale', size=size, files=[out_base + '.blueprint'],
                     voxels=n, note=f'mesh scaled into {size} core')
 
     # auto / tile: voxelize once at the requested absolute resolution, in a neutral grid
     verts, faces = VX.load_mesh(obj_path)
+    if rotate_to_z_up:
+        verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
-    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth)
+    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth,
+                                 crease_deg=crease_deg)
     # solid is a compact (N,3) int64 array (see voxelize_obj) -- shift with vectorized numpy,
     # not a per-voxel Python loop/set-rebuild (this path can carry the same near-grid^3
     # voxel counts as 'scale' mode, so the same blowup/slowdown applies here too).
