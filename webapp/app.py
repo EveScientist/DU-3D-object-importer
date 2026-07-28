@@ -65,7 +65,7 @@ def _opts(form):
         mode=form.get('mode', 'scale'),
         hollow=form.get('hollow') == 'on',
         smooth=form.get('smooth') == 'on',
-        rotate_to_z_up=form.get('rotate_to_z_up') != 'off',  # default on
+        rotate_to_z_up=form.get('rotate_to_z_up') == 'on',  # default on (checked by default in HTML)
         crease_deg=min(max(_f('crease_deg', 35.0), 5.0), 80.0),  # snappiness: 5-80°
         fill=min(max(_f('fill', 0.9), 0.05), 1.0),
         max_grid=min(max(_i('max_grid', 256), 32), 512),
