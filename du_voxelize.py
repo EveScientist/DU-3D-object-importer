@@ -778,6 +778,61 @@ def _erode(occ, n):
     return occ
 
 
+def _inner_boundary_anchors(shell, grid, verts, faces, want_anchors, cnormals=None, normals=None):
+    """For a HOLLOW shell, compute anchor targets for voxel corners on the INNER boundary
+    (boundary between shell and the eroded-away interior). Returns a dict of anchors on the
+    inner surface, or None if not wanted. Projects each inner corner onto the mesh (nearest
+    point on triangle), same as the outer surface pass."""
+    if not want_anchors or not shell.any():
+        return None
+    # Fast detection: the inner surface is where the shell meets the eroded void.
+    # Erode the shell to get the solid interior, then boundary = shell & ~eroded.
+    eroded = _erode(shell, 1)  # erode by 1 layer
+    is_boundary = shell & ~eroded  # voxels that are shell but not in the eroded core
+    boundary_voxels = np.argwhere(is_boundary)
+    if len(boundary_voxels) == 0:
+        return None
+    # For each boundary voxel, project its 8 corners onto the mesh
+    anchors = {}
+    for x, y, z in boundary_voxels:
+        for dx in (0, 1):
+            for dy in (0, 1):
+                for dz in (0, 1):
+                    cx, cy, cz = x + dx, y + dy, z + dz
+                    key = (int(cx), int(cy), int(cz))
+                    if key in anchors:
+                        continue   # already computed
+                    corner = np.array([cx + 0.5, cy + 0.5, cz + 0.5], dtype=np.float64)
+                    best_d2 = float('inf')
+                    best_target = None
+                    # Find nearest point on any triangle (same as outer surface pass)
+                    for fi in range(len(faces)):
+                        f = faces[fi]
+                        v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
+                        e0 = v1 - v0; e1 = v2 - v0; c = corner - v0
+                        d00 = float(e0 @ e0); d01 = float(e0 @ e1); d11 = float(e1 @ e1)
+                        denom = d00 * d11 - d01 * d01
+                        if abs(denom) < 1e-20:
+                            continue
+                        c_dot_e0 = float(c @ e0); c_dot_e1 = float(c @ e1)
+                        s = (d11 * c_dot_e0 - d01 * c_dot_e1) / denom
+                        t = (d00 * c_dot_e1 - d01 * c_dot_e0) / denom
+                        s_clipped = np.clip(s, 0.0, 1.0)
+                        t_clipped = np.clip(t, 0.0, 1.0)
+                        if s_clipped + t_clipped > 1.0:
+                            sum_st = s_clipped + t_clipped
+                            s_clipped /= sum_st
+                            t_clipped = 1.0 - s_clipped
+                        pt = v0 + s_clipped * e0 + t_clipped * e1
+                        d2 = float(np.sum((pt - corner) ** 2))
+                        if d2 < best_d2:
+                            best_d2 = d2
+                            best_target = tuple(pt)
+                    if best_target is not None:
+                        anchors[key] = (best_target, best_d2)
+    return anchors if anchors else None
+
+
 def hollow_shell(solid, grid, thickness):
     """Hollow a DENSE (grid,grid,grid) solid occupancy array to a shell `thickness` voxels
     thick: shell = solid minus (solid eroded by `thickness`). Where the shape is thinner than
@@ -1007,6 +1062,13 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         # shell of at least min_thickness voxels (>=1). Thin features stay solid because
         # erosion clears them, so the minimum never over-thins sharp edges.
         occ = hollow_shell(solid, grid, max(1, min_thickness))
+        # Compute anchors for the INNER surface (boundary between shell and eroded interior),
+        # so the inside is also smooth/deflected. Merge with outer anchors.
+        if want_anchors and anchors:
+            inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
+                                                    cnormals=cn, normals=None)
+            if inner_anchors:
+                anchors.update(inner_anchors)
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
