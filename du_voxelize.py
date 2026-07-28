@@ -1062,13 +1062,14 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         # shell of at least min_thickness voxels (>=1). Thin features stay solid because
         # erosion clears them, so the minimum never over-thins sharp edges.
         occ = hollow_shell(solid, grid, max(1, min_thickness))
-        # Compute anchors for the INNER surface (boundary between shell and eroded interior),
+        # TODO: Compute anchors for the INNER surface (boundary between shell and eroded interior),
         # so the inside is also smooth/deflected. Merge with outer anchors.
-        if want_anchors and anchors:
-            inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
-                                                    cnormals=cn, normals=None)
-            if inner_anchors:
-                anchors.update(inner_anchors)
+        # DISABLED: causing hang/infinite loop on some meshes -- needs optimization.
+        # if want_anchors and anchors:
+        #     inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
+        #                                             cnormals=cn, normals=None)
+        #     if inner_anchors:
+        #         anchors.update(inner_anchors)
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
