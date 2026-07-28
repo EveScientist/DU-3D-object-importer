@@ -781,18 +781,35 @@ def _erode(occ, n):
 def _inner_boundary_anchors(shell, grid, verts, faces, want_anchors, cnormals=None, normals=None):
     """For a HOLLOW shell, compute anchor targets for voxel corners on the INNER boundary
     (boundary between shell and the eroded-away interior). Returns a dict of anchors on the
-    inner surface, or None if not wanted. Projects each inner corner onto the mesh (nearest
-    point on triangle), same as the outer surface pass."""
+    inner surface, or None if not wanted. Uses spatial bucketing to avoid O(corners*triangles)
+    projection checks."""
     if not want_anchors or not shell.any():
         return None
     # Fast detection: the inner surface is where the shell meets the eroded void.
-    # Erode the shell to get the solid interior, then boundary = shell & ~eroded.
-    eroded = _erode(shell, 1)  # erode by 1 layer
-    is_boundary = shell & ~eroded  # voxels that are shell but not in the eroded core
+    eroded = _erode(shell, 1)
+    is_boundary = shell & ~eroded
     boundary_voxels = np.argwhere(is_boundary)
     if len(boundary_voxels) == 0:
         return None
-    # For each boundary voxel, project its 8 corners onto the mesh
+
+    # Spatial bucketing: divide grid into buckets, assign triangles to buckets they overlap.
+    # Each bucket covers BUCKET_SIZE voxels; corners query nearby buckets only.
+    BUCKET_SIZE = 16
+    buckets = {}
+    for fi in range(len(faces)):
+        f = faces[fi]
+        v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
+        lo = np.floor(np.minimum(np.minimum(v0, v1), v2)).astype(int)
+        hi = np.ceil(np.maximum(np.maximum(v0, v1), v2)).astype(int)
+        lo = np.clip(lo, 0, grid - 1); hi = np.clip(hi, 0, grid - 1)
+        for bx in range(lo[0] // BUCKET_SIZE, (hi[0] // BUCKET_SIZE) + 1):
+            for by in range(lo[1] // BUCKET_SIZE, (hi[1] // BUCKET_SIZE) + 1):
+                for bz in range(lo[2] // BUCKET_SIZE, (hi[2] // BUCKET_SIZE) + 1):
+                    key = (bx, by, bz)
+                    if key not in buckets:
+                        buckets[key] = []
+                    buckets[key].append(fi)
+
     anchors = {}
     for x, y, z in boundary_voxels:
         for dx in (0, 1):
@@ -801,12 +818,20 @@ def _inner_boundary_anchors(shell, grid, verts, faces, want_anchors, cnormals=No
                     cx, cy, cz = x + dx, y + dy, z + dz
                     key = (int(cx), int(cy), int(cz))
                     if key in anchors:
-                        continue   # already computed
+                        continue
                     corner = np.array([cx + 0.5, cy + 0.5, cz + 0.5], dtype=np.float64)
+                    # Query nearby buckets (corner bucket + adjacent buckets)
+                    bx, by, bz = cx // BUCKET_SIZE, cy // BUCKET_SIZE, cz // BUCKET_SIZE
+                    candidate_faces = set()
+                    for dbx in (-1, 0, 1):
+                        for dby in (-1, 0, 1):
+                            for dbz in (-1, 0, 1):
+                                bkey = (bx + dbx, by + dby, bz + dbz)
+                                candidate_faces.update(buckets.get(bkey, []))
+
                     best_d2 = float('inf')
                     best_target = None
-                    # Find nearest point on any triangle (same as outer surface pass)
-                    for fi in range(len(faces)):
+                    for fi in candidate_faces:
                         f = faces[fi]
                         v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
                         e0 = v1 - v0; e1 = v2 - v0; c = corner - v0
@@ -1062,14 +1087,13 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         # shell of at least min_thickness voxels (>=1). Thin features stay solid because
         # erosion clears them, so the minimum never over-thins sharp edges.
         occ = hollow_shell(solid, grid, max(1, min_thickness))
-        # TODO: Compute anchors for the INNER surface (boundary between shell and eroded interior),
+        # Compute anchors for the INNER surface (boundary between shell and eroded interior),
         # so the inside is also smooth/deflected. Merge with outer anchors.
-        # DISABLED: causing hang/infinite loop on some meshes -- needs optimization.
-        # if want_anchors and anchors:
-        #     inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
-        #                                             cnormals=cn, normals=None)
-        #     if inner_anchors:
-        #         anchors.update(inner_anchors)
+        if want_anchors and anchors:
+            inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
+                                                    cnormals=cn, normals=None)
+            if inner_anchors:
+                anchors.update(inner_anchors)
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
