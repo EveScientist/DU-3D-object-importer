@@ -17,9 +17,16 @@
           padding:22px; margin-bottom:18px; }
   label { display:block; font-weight:600; margin:14px 0 6px; }
   .hint { color:var(--mut); font-weight:400; font-size:13px; }
-  select, input[type=number], input[type=file] { width:100%; padding:9px 10px;
+  select, input[type=number], input[type=file], input[type=range] { width:100%; padding:9px 10px;
           background:#0e131a; color:var(--ink); border:1px solid var(--line);
           border-radius:8px; font-size:14px; }
+  input[type=range] { padding:0; height:30px; -webkit-appearance:none; appearance:none;
+          cursor:pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none;
+          width:18px; height:18px; border-radius:50%; background:var(--acc);
+          border:2px solid #001; cursor:pointer; }
+  input[type=range]::-moz-range-thumb { width:18px; height:18px; border-radius:50%;
+          background:var(--acc); border:2px solid #001; cursor:pointer; }
   .row { display:flex; gap:16px; flex-wrap:wrap; }
   .row > div { flex:1 1 200px; }
   .checks { display:flex; gap:22px; flex-wrap:wrap; margin-top:8px; }
@@ -131,11 +138,17 @@
         <label>Max resolution <span class="hint">— voxel grid cap (higher = sharper, slower)</span></label>
         <input type="number" name="max_grid" min="32" max="512" step="16" value="256">
       </div>
+      <div>
+        <label>Snappiness <span class="hint">— edge sharpness (lower = gentler edges, higher = ignores faint creases)</span></label>
+        <input type="range" name="crease_deg" min="5" max="80" step="1" value="35" id="snapSlider">
+        <div style="font-size:12px; color:var(--mut); margin-top:4px;">Crease angle: <span id="snapValue">35</span>°</div>
+      </div>
     </div>
 
     <div class="checks">
       <label><input type="checkbox" name="smooth" checked> Smooth surface <span class="hint">(deflect to the mesh; keeps sharp edges — uncheck for pure blocky voxels)</span></label>
       <label><input type="checkbox" name="hollow" id="hollow"> Hollow <span class="hint">(shell only / keep internal voids)</span></label>
+      <label><input type="checkbox" name="rotate_to_z_up" checked> Rotate to Z-up <span class="hint">(OBJ/STL are Y-up; DU is Z-up)</span></label>
     </div>
 
     <div class="row" id="thickrow" style="display:none">
@@ -163,7 +176,9 @@
 const f = document.getElementById('f'), st = document.getElementById('status'),
       go = document.getElementById('go'), bar = document.getElementById('bar');
 const hollow = document.getElementById('hollow'), thickrow = document.getElementById('thickrow');
+const snapSlider = document.getElementById('snapSlider'), snapValue = document.getElementById('snapValue');
 hollow.addEventListener('change', () => { thickrow.style.display = hollow.checked ? 'flex' : 'none'; });
+snapSlider.addEventListener('input', () => { snapValue.textContent = snapSlider.value; });
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
   st.className = 'status'; st.textContent = 'Voxelizing and building blueprint… this can take up to a minute for high resolution.';
