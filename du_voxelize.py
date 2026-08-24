@@ -779,13 +779,21 @@ def fill_solid(surface, grid):
 
 def _erode(occ, n):
     """Erode a 3D boolean occupancy array by n layers (6-connectivity): a voxel survives
-    iff it and all 6 face-neighbours were solid, repeated n times. numpy shift-and-AND."""
+    iff it and all 6 face-neighbours were solid, repeated n times. Vectorized for speed."""
+    occ = occ.astype(bool)
     for _ in range(n):
-        e = occ.copy()
-        e[1:, :, :] &= occ[:-1, :, :]; e[:-1, :, :] &= occ[1:, :, :]
-        e[:, 1:, :] &= occ[:, :-1, :]; e[:, :-1, :] &= occ[:, 1:, :]
-        e[:, :, 1:] &= occ[:, :, :-1]; e[:, :, :-1] &= occ[:, :, 1:]
-        occ = e
+        result = np.zeros_like(occ)
+        # Combine all neighbor checks at once (avoids intermediate copies)
+        result[1:-1, 1:-1, 1:-1] = (
+            occ[1:-1, 1:-1, 1:-1] &
+            occ[:-2, 1:-1, 1:-1] &  # i-1 neighbor
+            occ[2:, 1:-1, 1:-1] &   # i+1 neighbor
+            occ[1:-1, :-2, 1:-1] &  # j-1 neighbor
+            occ[1:-1, 2:, 1:-1] &   # j+1 neighbor
+            occ[1:-1, 1:-1, :-2] &  # k-1 neighbor
+            occ[1:-1, 1:-1, 2:]     # k+1 neighbor
+        )
+        occ = result
     return occ
 
 
