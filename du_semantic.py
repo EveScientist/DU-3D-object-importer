@@ -29,7 +29,7 @@ import struct
 import numpy as np
 
 MAT_HCCARBON = (3417309861, 'hcCarbon')
-MAT_HCCARBON_B = (1297267071, 'hcAlLiMa')  # Matte Al-Li panel material from 3850_export.blueprint
+MAT_HCCARBON_B = (1961402217, 'hcSodium')  # White Sodium Panel from 3858_export.blueprint
 MAT_DEBUG1 = (157903047, 'Debug1\x00\x00')
 
 CELL_MAGIC = 0x27b8a013
