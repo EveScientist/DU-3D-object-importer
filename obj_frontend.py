@@ -16,6 +16,7 @@ import os
 import numpy as np
 
 import du_voxelize as VX
+import du_semantic
 import obj_pipeline as P
 import du_envelope as E
 
@@ -100,9 +101,11 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
                      hollow=False, smooth=False, grid=None, name=None, material=None,
-                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0):
+                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0,
+                     second_material=False):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
-    onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
+    onto the mesh (sub-voxel, +-1.19 vox cap). second_material=True uses angle-based
+    material tagging (sharp edges get a second material). Returns (voxel_count, lod_record_set)."""
     voxels, smooth_fn, labels = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
                                      max_grid=max_grid, min_thickness=min_thickness,
@@ -110,8 +113,11 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
+    mat_base = material or du_semantic.MAT_HCCARBON
+    materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
     want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn if smooth else None,
-                                 material=material, size=size, core_type=core_type)
+                                 material=material, size=size, core_type=core_type,
+                                 labels=labels if second_material else None, materials=materials)
     return len(voxels), want
 
 
@@ -164,7 +170,8 @@ def preview_mesh(voxels, smooth_fn=None, deflect_cap=100 / 84.0):
 
 def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='static',
                       resolution=None, fill_fraction=0.9, hollow=False, smooth=False,
-                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0):
+                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0,
+                      second_material=False):
     """Unified entry: .obj -> one or many blueprints, by mode.
 
       mode='scale' : scale the mesh to fit the SPECIFIED `size` core (fill_fraction). One
@@ -190,7 +197,8 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         n, want = obj_to_blueprint(obj_path, out_base + '.blueprint', size=size,
                                    core_type=core_type, fill_fraction=fill_fraction,
                                    hollow=hollow, smooth=smooth, name=name, material=material,
-                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
+                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg,
+                                   second_material=second_material)
         return dict(mode='scale', size=size, files=[out_base + '.blueprint'],
                     voxels=n, note=f'mesh scaled into {size} core')
 
@@ -216,8 +224,11 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         s = T.smallest_core_for(extent)
         voxels, d = _place_in_core(solid, s)
         sm = VX.anchor_smooth_fn(anchors, delta=d) if smooth else None
+        mat_base = material or du_semantic.MAT_HCCARBON
+        materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
         want = P.build_blueprint_sem(out_base + '.blueprint', voxels, name,
-                                     smooth_fn=sm, material=material, size=s, core_type=core_type)
+                                     smooth_fn=sm, material=material, size=s, core_type=core_type,
+                                     labels=labels if second_material else None, materials=materials)
         return dict(mode='auto', size=s, files=[out_base + '.blueprint'],
                     voxels=len(voxels), note=f'{extent}-vox mesh -> smallest fitting core {s}')
 
@@ -239,8 +250,11 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
                          if all(0 <= k[i] - base[i] < cv for i in range(3))}
                 sm = VX.anchor_smooth_fn(tanch, delta=d)
             fn = f'{out_base}_{tijk[0]}_{tijk[1]}_{tijk[2]}.blueprint'
+            mat_base = material or du_semantic.MAT_HCCARBON
+            materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
             P.build_blueprint_sem(fn, voxels, f'{name} [{tijk[0]},{tijk[1]},{tijk[2]}]',
-                                  smooth_fn=sm, material=material, size=size, core_type=core_type)
+                                  smooth_fn=sm, material=material, size=size, core_type=core_type,
+                                  labels=labels if second_material else None, materials=materials)
             files.append(fn); offsets.append(tijk)
         return dict(mode='tile', size=size, grid=T.plan(extent, 'tile', size)['grid'],
                     files=files, offsets=offsets,
