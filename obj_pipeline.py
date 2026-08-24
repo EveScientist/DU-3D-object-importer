@@ -438,9 +438,13 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             (materials[0][0], materials[0][1], 2),
             (materials[1][0], materials[1][1], 3)
         ]
+        import numpy as np
+        print(f"[build_blueprint_sem] MULTI-MATERIAL enabled: mapping={mapping}, "
+              f"labels unique={np.unique(labels).tolist()}, dtype={gocc.dtype}")
     else:
         gocc, glo, gdim = du_semantic.global_occupancy(abs_arr)   # slice windows O(1)/chunk
         mapping = None  # single-material: default mapping used in build_cell
+        print(f"[build_blueprint_sem] Single-material mode")
     # real Model.Bounds from the material-cell bbox (voxel+1), /4 world units -- DU anchors
     # placement to these; a placeholder box (old bug) deployed the construct offset. Computed
     # here (not after the entries loop) so abs_arr/varr can be freed before the fork below.

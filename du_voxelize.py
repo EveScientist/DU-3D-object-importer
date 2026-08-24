@@ -1183,7 +1183,11 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         if len(crease_arr):
             crease_occ = np.zeros((grid, grid, grid), bool)
             crease_occ[tuple(crease_arr.T)] = True  # vectorized indexing (faster than loop)
-            labels[crease_occ[voxels[:, 0], voxels[:, 1], voxels[:, 2]]] = 2
+            crease_mask = crease_occ[voxels[:, 0], voxels[:, 1], voxels[:, 2]]
+            n_crease = np.sum(crease_mask)
+            if n_crease > 0:
+                labels[crease_mask] = 2
+                print(f"[voxelize] {n_crease}/{len(voxels)} voxels marked as crease (material label=2)")
     return voxels, anchors, labels
 
 
