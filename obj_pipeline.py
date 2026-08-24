@@ -405,6 +405,7 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     else:
         OFF = (anchor, anchor, anchor)
     abs_arr = varr + np.array(OFF, np.int64)                  # placed cells (N,3), numpy
+    n_voxels_total = len(abs_arr)  # save before abs_arr is deleted later
     safe, reasons = du_semantic.semantic_confidence(varr)
     for r in reasons:
         print(f"[validate] WARNING: {r} -- deploy at own risk / verify with a donor")
@@ -496,9 +497,8 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
                                      bbox=bbox)
     json.dump(out, open(out_path, 'w'))
     elapsed = time.time() - t0
-    n_voxels = len(abs_arr) if len(abs_arr) else 0
     print(f"[build_blueprint_sem] Blueprint complete: {len(entries)} LOD entries, "
-          f"{n_voxels} voxels, {elapsed:.1f}s, {len(entries)/max(1,elapsed):.1f} entries/sec")
+          f"{n_voxels_total} voxels, {elapsed:.1f}s, {len(entries)/max(1,elapsed):.1f} entries/sec")
     return want
 
 
