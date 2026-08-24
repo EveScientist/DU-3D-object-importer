@@ -29,6 +29,7 @@ import struct
 import numpy as np
 
 MAT_HCCARBON = (3417309861, 'hcCarbon')
+MAT_HCCARBON_B = (3417309861, 'hcCarbon')  # Placeholder: same hash, second mapping slot
 MAT_DEBUG1 = (157903047, 'Debug1\x00\x00')
 
 CELL_MAGIC = 0x27b8a013
@@ -150,7 +151,8 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
 
     # vertex window = matwin + phantom +33 plane per axis = COPY of the +32 plane, applied
     # sequentially x,y,z (matches the old set-union order incl. cross-axis phantoms).
-    win = occ.copy()
+    # Convert to bool for phantom copy logic (occupancy only), then back if needed.
+    win = occ.astype(bool) if occ.dtype == np.int8 else occ.copy()
     win[35, :, :] |= win[34, :, :]
     win[:, 35, :] |= win[:, 34, :]
     win[:, :, 35] |= win[:, :, 34]
@@ -173,7 +175,11 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
             ypay.update(seam_pos)
 
     # materials list (z-fastest C order) -- mat_idx where occupied else None
-    mats = np.where(mat_occ.reshape(-1), mat_idx, -1).tolist()
+    # When mat_occ is int8 (per-voxel material labels), use values directly; 0 = empty
+    if mat_occ.dtype == np.int8:
+        mats = np.where(mat_occ.reshape(-1) == 0, -1, mat_occ.reshape(-1)).tolist()
+    else:  # bool grid: broadcast scalar mat_idx
+        mats = np.where(mat_occ.reshape(-1), mat_idx, -1).tolist()
     mats = [None if v < 0 else v for v in mats]
 
     # vertices: default (126,126,126) at every surface cell, then apply sparse pos overrides
@@ -279,9 +285,25 @@ def global_occupancy(voxels):
     return g, lo, dim
 
 
+def global_material_grid(voxels, labels, label_to_matidx):
+    """Dense (int8 grid, lo, dim) of per-voxel material indices. Used when multi-material
+    support is enabled. labels: (N,) uint8 array of per-voxel material labels.
+    label_to_matidx: dict mapping label -> mat_idx byte (e.g. {1: 2, 2: 3})."""
+    arr = voxels if isinstance(voxels, np.ndarray) else np.asarray(list(voxels))
+    lo = tuple(int(arr[:, i].min()) for i in range(3))
+    dim = tuple(int(arr[:, i].max()) - lo[i] + 1 for i in range(3))
+    g = np.zeros(dim, np.int8)  # 0=empty
+    mat_indices = np.array([label_to_matidx.get(int(l), 0) for l in labels], np.int8)
+    g[arr[:, 0] - lo[0], arr[:, 1] - lo[1], arr[:, 2] - lo[2]] = mat_indices
+    return g, lo, dim
+
+
 def mat_window(gocc, lo, dim, io):
-    """(35,35,35) bool material window [io-2, io+32] sliced from the global occupancy."""
-    out = np.zeros((35, 35, 35), bool)
+    """(35,35,35) window [io-2, io+32] sliced from global occupancy (bool or int8).
+    When gocc is int8 (per-voxel material indices), returns the int8 window (0=empty).
+    When gocc is bool, returns bool window."""
+    dtype = gocc.dtype
+    out = np.zeros((35, 35, 35), dtype)
     ss, ds = [], []
     for i in range(3):
         a0 = io[i] - 2
