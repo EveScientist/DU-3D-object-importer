@@ -824,12 +824,16 @@ def _inner_boundary_anchors(shell, grid, verts, faces, want_anchors, cnormals=No
     projection checks."""
     if not want_anchors or not shell.any():
         return None
+    import time
+    t0 = time.time()
     # Fast detection: the inner surface is where the shell meets the eroded void.
     eroded = _erode(shell, 1)
     is_boundary = shell & ~eroded
     boundary_voxels = np.argwhere(is_boundary)
     if len(boundary_voxels) == 0:
         return None
+    print(f"[_inner_boundary_anchors] {len(boundary_voxels)} boundary voxels, "
+          f"projecting ~{len(boundary_voxels)*8} corners onto {len(faces)} triangles...")
 
     # Spatial bucketing: divide grid into buckets, assign triangles to buckets they overlap.
     # Each bucket covers BUCKET_SIZE voxels; corners query nearby buckets only.
@@ -894,6 +898,8 @@ def _inner_boundary_anchors(shell, grid, verts, faces, want_anchors, cnormals=No
                             best_target = tuple(pt)
                     if best_target is not None:
                         anchors[key] = (best_target, best_d2)
+    elapsed = time.time() - t0
+    print(f"[_inner_boundary_anchors] Complete: {len(anchors)} anchors in {elapsed:.1f}s")
     return anchors if anchors else None
 
 
