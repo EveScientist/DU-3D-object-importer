@@ -29,8 +29,6 @@ import struct
 import numpy as np
 
 MAT_HCCARBON = (3417309861, 'hcCarbon')
-MAT_HCCARBON_B = (1961402217, 'hcSodium')  # White Sodium Panel from 3858_export.blueprint
-MAT_DEBUG1 = (157903047, 'Debug1\x00\x00')
 
 CELL_MAGIC = 0x27b8a013
 CELL_VERSION = 6
@@ -123,11 +121,11 @@ def canonical_y_payload(voxels, io, zlo=None, zhi=None):
 
 
 def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
-               mapping=None, mat_idx=2, yseam_payload=True, matocc=None):
+               mat_idx=2, yseam_payload=True, matocc=None):
     """One chunk record body (uncompressed). voxels = GLOBAL absolute voxel set.
     inner_origin = 32*chunk_key triple. pos_fn(cell)->(px,py,pz) or None for default.
-    mapping/mat_idx: override the material palette (donor palettes vary by build
-    session, e.g. 3325 has hcCarbon at slot 3).
+    mat_idx: material slot (default 2; donor palettes vary by build session, e.g. 3325 has
+    hcCarbon at slot 3).
     matocc: FAST PATH -- a (35,35,35) bool occupancy of the material window [io-2, io+32]
     (build_blueprint_sem slices it from a global grid). When given, skips the per-voxel
     loop AND the canonical Y-seam payload (generation doesn't need the blocky build-state
@@ -240,7 +238,7 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
         i = j
 
     if mapping is None:
-        mapping = [(MAT_DEBUG1[0], MAT_DEBUG1[1], 1), (material[0], material[1], mat_idx)]
+        mapping = [(material[0], material[1], mat_idx)]
     out += struct.pack('<I', len(mapping))
     for mid, name, idx in mapping:
         nm = name.ljust(8, '\x00')[:8].encode()
@@ -282,21 +280,6 @@ def global_occupancy(voxels):
     dim = tuple(int(arr[:, i].max()) - lo[i] + 1 for i in range(3))
     g = np.zeros(dim, bool)
     g[arr[:, 0] - lo[0], arr[:, 1] - lo[1], arr[:, 2] - lo[2]] = True
-    return g, lo, dim
-
-
-def global_material_grid(voxels, labels, label_to_matidx):
-    """Dense (int8 grid, lo, dim) of per-voxel material indices. Used when multi-material
-    support is enabled. labels: (N,) uint8 array of per-voxel material labels.
-    label_to_matidx: dict mapping label -> mat_idx byte (e.g. {1: 2, 2: 3})."""
-    arr = voxels if isinstance(voxels, np.ndarray) else np.asarray(list(voxels))
-    lo = tuple(int(arr[:, i].min()) for i in range(3))
-    dim = tuple(int(arr[:, i].max()) - lo[i] + 1 for i in range(3))
-    g = np.zeros(dim, np.int8)  # 0=empty
-    mat_indices = np.zeros(len(labels), np.int8)  # vectorized label->idx mapping
-    for label, idx in label_to_matidx.items():
-        mat_indices[labels == label] = idx
-    g[arr[:, 0] - lo[0], arr[:, 1] - lo[1], arr[:, 2] - lo[2]] = mat_indices
     return g, lo, dim
 
 

@@ -36,7 +36,7 @@ MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
                  grid=None, want_anchors=False, max_grid=256, min_thickness=2,
                  rotate_to_z_up=True, crease_deg=35.0):
-    """.obj -> (voxels, smooth_fn, labels) in construct-local coords (min corner near CORE_ORIGIN).
+    """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
 
     size           core size name (XS..XXL); sets the voxel resolution unless `grid`.
     fill_fraction  fraction of the core edge the longest mesh axis fills (0<f<=1) --
@@ -50,7 +50,6 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
                    applied before voxelizing so all downstream logic is consistent.
     crease_deg    edge-sharpness threshold: faces diverging > this angle are crease-snapped
                   (lower = catches gentler edges, 10-60 range typical; default 35).
-    labels        (N,) uint8 array: 1=base material, 2=crease-face material.
     """
     import time
     try:
@@ -99,7 +98,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     log_mem("FITTED TO GRID")
 
     print("[obj] VOXELIZING (surface detection + fill)...")
-    solid, anchors, labels = VX.voxelize(verts, faces, grid, hollow=hollow,
+    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness,
                                  crease_deg=crease_deg)
     log_mem(f"VOXELIZED: {len(solid)} voxels")
@@ -118,28 +117,23 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     smooth_fn = None
     if want_anchors and anchors:
         smooth_fn = VX.anchor_smooth_fn(anchors, delta=d)   # shifts key AND target by d
-    return voxels, smooth_fn, labels
+    return voxels, smooth_fn
 
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
                      hollow=False, smooth=False, grid=None, name=None, material=None,
-                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0,
-                     second_material=False):
+                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
-    onto the mesh (sub-voxel, +-1.19 vox cap). second_material=True uses angle-based
-    material tagging (sharp edges get a second material). Returns (voxel_count, lod_record_set)."""
-    voxels, smooth_fn, labels = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
+    onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
+    voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
                                      max_grid=max_grid, min_thickness=min_thickness,
                                      rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
-    mat_base = material or du_semantic.MAT_HCCARBON
-    materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
     want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn if smooth else None,
-                                 material=material, size=size, core_type=core_type,
-                                 labels=labels if second_material else None, materials=materials)
+                                 material=material, size=size, core_type=core_type)
     return len(voxels), want
 
 
@@ -192,8 +186,7 @@ def preview_mesh(voxels, smooth_fn=None, deflect_cap=100 / 84.0):
 
 def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='static',
                       resolution=None, fill_fraction=0.9, hollow=False, smooth=False,
-                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0,
-                      second_material=False):
+                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0):
     """Unified entry: .obj -> one or many blueprints, by mode.
 
       mode='scale' : scale the mesh to fit the SPECIFIED `size` core (fill_fraction). One
@@ -219,8 +212,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         n, want = obj_to_blueprint(obj_path, out_base + '.blueprint', size=size,
                                    core_type=core_type, fill_fraction=fill_fraction,
                                    hollow=hollow, smooth=smooth, name=name, material=material,
-                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg,
-                                   second_material=second_material)
+                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
         return dict(mode='scale', size=size, files=[out_base + '.blueprint'],
                     voxels=n, note=f'mesh scaled into {size} core')
 
@@ -230,7 +222,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
-    solid, anchors, labels = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth,
+    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth,
                                  crease_deg=crease_deg)
     # solid is a compact (N,3) int64 array (see voxelize_obj) -- shift with vectorized numpy,
     # not a per-voxel Python loop/set-rebuild (this path can carry the same near-grid^3
@@ -246,11 +238,8 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         s = T.smallest_core_for(extent)
         voxels, d = _place_in_core(solid, s)
         sm = VX.anchor_smooth_fn(anchors, delta=d) if smooth else None
-        mat_base = material or du_semantic.MAT_HCCARBON
-        materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
         want = P.build_blueprint_sem(out_base + '.blueprint', voxels, name,
-                                     smooth_fn=sm, material=material, size=s, core_type=core_type,
-                                     labels=labels if second_material else None, materials=materials)
+                                     smooth_fn=sm, material=material, size=s, core_type=core_type)
         return dict(mode='auto', size=s, files=[out_base + '.blueprint'],
                     voxels=len(voxels), note=f'{extent}-vox mesh -> smallest fitting core {s}')
 
@@ -272,11 +261,8 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
                          if all(0 <= k[i] - base[i] < cv for i in range(3))}
                 sm = VX.anchor_smooth_fn(tanch, delta=d)
             fn = f'{out_base}_{tijk[0]}_{tijk[1]}_{tijk[2]}.blueprint'
-            mat_base = material or du_semantic.MAT_HCCARBON
-            materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
             P.build_blueprint_sem(fn, voxels, f'{name} [{tijk[0]},{tijk[1]},{tijk[2]}]',
-                                  smooth_fn=sm, material=material, size=size, core_type=core_type,
-                                  labels=labels if second_material else None, materials=materials)
+                                  smooth_fn=sm, material=material, size=size, core_type=core_type)
             files.append(fn); offsets.append(tijk)
         return dict(mode='tile', size=size, grid=T.plan(extent, 'tile', size)['grid'],
                     files=files, offsets=offsets,

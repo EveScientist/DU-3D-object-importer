@@ -70,7 +70,6 @@ def _opts(form):
         fill=min(max(_f('fill', 0.9), 0.05), 1.0),
         max_grid=min(max(_i('max_grid', 256), 32), 512),
         min_thickness=min(max(_i('min_thickness', 2), 1), 16),
-        second_material=form.get('second_material') == 'on',
     )
 
 
@@ -91,7 +90,7 @@ def preview():
         # snappy interactive re-render -- payload + preview_mesh time scale with surface area.
         pv_cap = PREVIEW_CAP
         pv_grid = min(o['max_grid'], pv_cap)
-        voxels, smooth_fn, labels = F.voxelize_obj(
+        voxels, smooth_fn = F.voxelize_obj(
             obj_path, size=o['size'], fill_fraction=o['fill'], hollow=o['hollow'],
             want_anchors=o['smooth'], max_grid=pv_grid, min_thickness=o['min_thickness'],
             rotate_to_z_up=o['rotate_to_z_up'], crease_deg=o['crease_deg'])
@@ -124,7 +123,6 @@ def convert():
     hollow, smooth = o['hollow'], o['smooth']
     fill, max_grid, min_thickness = o['fill'], o['max_grid'], o['min_thickness']
     rotate_to_z_up, crease_deg = o['rotate_to_z_up'], o['crease_deg']
-    second_material = o['second_material']
 
     stem = os.path.splitext(os.path.basename(up.filename))[0][:40] or 'model'
     token = uuid.uuid4().hex[:8]
@@ -137,15 +135,14 @@ def convert():
         if mode == 'auto':
             m = F.obj_to_blueprints(obj_path, os.path.join(WORKDIR, token), mode='auto',
                                     core_type=core_type, resolution=max_grid, hollow=hollow,
-                                    smooth=smooth, name=stem, second_material=second_material)
+                                    smooth=smooth, name=stem)
             produced = m['files'][0]
             size = m['size']
         else:
             F.obj_to_blueprint(obj_path, out_path, size=size, core_type=core_type,
                                fill_fraction=fill, hollow=hollow, smooth=smooth,
                                name=stem, max_grid=max_grid, min_thickness=min_thickness,
-                               rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg,
-                               second_material=second_material)
+                               rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
             produced = out_path
         return send_file(produced, as_attachment=True,
                          download_name=f'{stem}_{size}.blueprint',

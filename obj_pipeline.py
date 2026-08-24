@@ -60,11 +60,9 @@ def _emit_chunk(hxyz):
     if h == 3:
         mo = du_semantic.mat_window(ctx['gocc'], ctx['glo'], ctx['gdim'], io)
         body = du_semantic.build_cell(None, io, material=ctx['mat'], pos_fn=ctx['pos_fn'],
-                                      yseam_payload=ctx['yseam_payload'], matocc=mo,
-                                      mapping=ctx.get('mapping'))
+                                      yseam_payload=ctx['yseam_payload'], matocc=mo)
     else:
-        body = du_semantic.build_cell(set(), io,
-            mapping=[(du_semantic.MAT_DEBUG1[0], du_semantic.MAT_DEBUG1[1], 1)])
+        body = du_semantic.build_cell(set(), io)
     b64, hsh = _encode_body(body)
     e['records']['voxel']['data']['$binary'] = b64
     e['records']['voxel']['hash']['$numberLong'] = hsh
@@ -359,15 +357,13 @@ TEMPLATE_M = os.environ.get(
 
 def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=True,
                         material=None, size='M', core_type='static',
-                        record_template=TEMPLATE_M, place=None, labels=None, materials=None):
+                        record_template=TEMPLATE_M, place=None):
     """From-scratch blueprint via the SEMANTIC emitter (du_semantic). Every voxel body is
     generated whole (h3 = real cells; h4..hN = EMPTY -- DU regenerates LODs client-side).
     The Model/Elements envelope is synthesized via du_envelope. The per-record JSON skeleton
     is cloned from record_template (core-size-independent; DU recomputes meta on import).
     voxels in construct-local coords. smooth_fn(x,y,z)->target maps to per-vertex positions
     (84 steps/vox, clamp +/-100).
-    labels: optional (N,) uint8 array of per-voxel material labels (1=base, 2=crease, etc).
-    materials: optional [mat_base, mat_crease] list when multi-material is enabled.
 
     CORE SIZE: all sizes (XS..XXXXXL) are deploy-verified 2026-07-18 (dep20/20b/20c: S/M/L
     boxes rendered). The octree layout per core comes from core_octree_params (levels
@@ -432,23 +428,7 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     # a fixed chunk0 (mismatch = empty meshes, dep23). Non-empty leaves + all ancestors to the
     # single root h(core_h); DU regenerates LOD content from h3 (phantoms unneeded).
     want = octree_from_cells(abs_arr, core_h)
-    # Build occupancy grid (bool for single-material, int8 for multi-material)
-    if labels is not None and materials is not None:
-        label_to_matidx = {1: 2, 2: 3}  # base=2, crease=3 in mapping table
-        gocc, glo, gdim = du_semantic.global_material_grid(abs_arr, labels, label_to_matidx)
-        # Build multi-material mapping: [DEBUG1@1, base@2, crease@3]
-        mapping = [
-            (du_semantic.MAT_DEBUG1[0], du_semantic.MAT_DEBUG1[1], 1),
-            (materials[0][0], materials[0][1], 2),
-            (materials[1][0], materials[1][1], 3)
-        ]
-        import numpy as np
-        print(f"[build_blueprint_sem] MULTI-MATERIAL enabled: mapping={mapping}, "
-              f"labels unique={np.unique(labels).tolist()}, dtype={gocc.dtype}")
-    else:
-        gocc, glo, gdim = du_semantic.global_occupancy(abs_arr)   # slice windows O(1)/chunk
-        mapping = None  # single-material: default mapping used in build_cell
-        print(f"[build_blueprint_sem] Single-material mode")
+    gocc, glo, gdim = du_semantic.global_occupancy(abs_arr)   # slice windows O(1)/chunk
     # real Model.Bounds from the material-cell bbox (voxel+1), /4 world units -- DU anchors
     # placement to these; a placeholder box (old bug) deployed the construct offset. Computed
     # here (not after the entries loop) so abs_arr/varr can be freed before the fork below.
@@ -465,8 +445,6 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     global _WORKER_CTX
     ctx_dict = dict(proto=proto, gocc=gocc, glo=glo, gdim=gdim, mat=mat,
                     pos_fn=pos_fn, yseam_payload=yseam_payload)
-    if mapping is not None:
-        ctx_dict['mapping'] = mapping
     _WORKER_CTX = ctx_dict
     try:
         if use_pool:

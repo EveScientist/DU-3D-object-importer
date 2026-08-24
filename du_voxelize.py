@@ -1130,10 +1130,9 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     a compact (N,3) int64 coordinate array via np.argwhere (vectorized, no per-voxel Python
     object churn), not a Python set -- for a solid shape N can be ~all of grid^3, and a
     coordinate array costs ~24 B/entry vs ~190 B/entry for a set of tuples."""
-    cface = crease_faces(verts, faces, crease_deg)
     cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
-    surface, anchors, crease_surface = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
-                                        cnormals=cn, crease_face=cface)
+    surface, anchors, _ = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
+                                        cnormals=cn, crease_face=None)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
     if want_anchors and preserve_features and anchors:
@@ -1184,19 +1183,7 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
     print(f"[voxelize] FINAL: {len(voxels)} voxels extracted from {occ.dtype} occupancy grid")
-    # Compute per-voxel material labels: 1=base, 2=crease
-    labels = np.ones(len(voxels), np.uint8)
-    if crease_surface is not None and len(crease_surface):
-        crease_arr = np.array(list(crease_surface), np.int32)
-        if len(crease_arr):
-            crease_occ = np.zeros((grid, grid, grid), bool)
-            crease_occ[tuple(crease_arr.T)] = True  # vectorized indexing (faster than loop)
-            crease_mask = crease_occ[voxels[:, 0], voxels[:, 1], voxels[:, 2]]
-            n_crease = np.sum(crease_mask)
-            if n_crease > 0:
-                labels[crease_mask] = 2
-                print(f"[voxelize] {n_crease}/{len(voxels)} voxels marked as crease (material label=2)")
-    return voxels, anchors, labels
+    return voxels, anchors
 
 
 def anchor_smooth_fn(anchors, delta=(0, 0, 0)):
