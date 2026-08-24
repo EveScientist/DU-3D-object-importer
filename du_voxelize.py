@@ -386,13 +386,17 @@ def corner_normals(verts, faces, crease_deg=35.0):
     return out
 
 
-def _voxelize_surface_faces(verts, faces, grid, want_anchors, normals, cnormals, face_idx):
+def _voxelize_surface_faces(verts, faces, grid, want_anchors, normals, cnormals, face_idx,
+                             crease_face=None):
     """Core per-triangle loop, over just `face_idx` (an iterable of face indices into
     `faces`). Shared by the serial path and each parallel worker's chunk -- see
     voxelize_surface for why splitting by triangle can be parallelized (surface is a plain
     union across triangles/workers; anchors keeps whichever triangle gave the closest point,
-    which is an associative per-key min, so partial per-worker dicts merge correctly too)."""
+    which is an associative per-key min, so partial per-worker dicts merge correctly too).
+    crease_face: optional (len(faces),) bool array; when given, tracks which surface voxels
+    came from a crease-angle face for material tagging."""
     surface = set()
+    crease_surface = set() if crease_face is not None else None
     anchors = {} if want_anchors else None
     for fi in face_idx:
         f = faces[fi]
@@ -408,6 +412,8 @@ def _voxelize_surface_faces(verts, faces, grid, want_anchors, normals, cnormals,
         mask = _tri_aabb_overlap(v0, v1, v2, ix + 0.5, iy + 0.5, iz + 0.5)
         for x, y, z in zip(ix[mask], iy[mask], iz[mask]):
             surface.add((int(x), int(y), int(z)))
+            if crease_surface is not None and crease_face[fi]:
+                crease_surface.add((int(x), int(y), int(z)))
         if want_anchors:
             if cnormals is not None:
                 tn = (cnormals[fi, 0], cnormals[fi, 1], cnormals[fi, 2])
@@ -416,7 +422,7 @@ def _voxelize_surface_faces(verts, faces, grid, want_anchors, normals, cnormals,
             else:
                 tn = None
             _accumulate_anchors(anchors, v0, v1, v2, ix[mask], iy[mask], iz[mask], tn, fi)
-    return surface, anchors
+    return surface, anchors, crease_surface
 
 
 _SURFACE_PARALLEL_MIN_WORK = 8 * 64   # faces * grid; skip pool overhead below this
@@ -431,14 +437,16 @@ def _voxelize_surface_chunk(worker_i):
     ctx = _SURF_CTX
     face_idx = range(worker_i, len(ctx['faces']), ctx['n_workers'])
     return _voxelize_surface_faces(ctx['verts'], ctx['faces'], ctx['grid'], ctx['want_anchors'],
-                                   ctx['normals'], ctx['cnormals'], face_idx)
+                                   ctx['normals'], ctx['cnormals'], face_idx, crease_face=ctx.get('crease_face'))
 
 
-def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnormals=None):
-    """Surface voxel set (SAT-exact) + optional anchor map {corner -> nearest surface pt}.
+def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnormals=None, crease_face=None):
+    """Surface voxel set (SAT-exact) + optional anchor map {corner -> nearest surface pt}
+    + optional crease_surface (voxels on high-dihedral-angle faces).
     Numpy-batched per triangle over its candidate voxel slab. `cnormals` (M,3,3 crease-limited
     corner normals) projects anchor targets onto the PN-triangle surface, rounding curved
     regions while keeping flats/sharp edges; `normals` (per-vertex) is the legacy blend.
+    crease_face: optional (len(faces),) bool array marking crease faces for material tagging.
 
     Split across a process pool (round-robin by triangle) when there's enough total work and
     fork() is available -- large flat triangles (a cube's 12 faces, say) dominate at high
@@ -452,13 +460,13 @@ def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnorma
     use_pool = (len(faces) * grid >= _SURFACE_PARALLEL_MIN_WORK and n_workers > 1
                 and 'fork' in multiprocessing.get_all_start_methods())
     if not use_pool:
-        surface, anchors = _voxelize_surface_faces(verts, faces, grid, want_anchors,
-                                                   normals, cnormals, range(len(faces)))
-        return surface, _strip_fi(anchors)
+        surface, anchors, crease_surface = _voxelize_surface_faces(verts, faces, grid, want_anchors,
+                                                   normals, cnormals, range(len(faces)), crease_face=crease_face)
+        return surface, _strip_fi(anchors), crease_surface
     n = min(n_workers, len(faces))
     global _SURF_CTX
     _SURF_CTX = dict(verts=verts, faces=faces, grid=grid, want_anchors=want_anchors,
-                     normals=normals, cnormals=cnormals, n_workers=n)
+                     normals=normals, cnormals=cnormals, n_workers=n, crease_face=crease_face)
     try:
         ctx = multiprocessing.get_context('fork')
         with ctx.Pool(n) as pool:
@@ -466,9 +474,12 @@ def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnorma
     finally:
         _SURF_CTX = None
     surface = set()
+    crease_surface = set() if crease_face is not None else None
     anchors = {} if want_anchors else None
-    for psurf, panch in parts:
+    for psurf, panch, pcrease in parts:
         surface |= psurf
+        if crease_surface is not None:
+            crease_surface |= pcrease
         if want_anchors:
             for k, v in panch.items():
                 prev = anchors.get(k)
@@ -476,7 +487,7 @@ def voxelize_surface(verts, faces, grid, want_anchors=True, normals=None, cnorma
                 # independent of how faces were partitioned across workers.
                 if prev is None or v[1] < prev[1] or (v[1] == prev[1] and v[2] < prev[2]):
                     anchors[k] = v
-    return surface, _strip_fi(anchors)
+    return surface, _strip_fi(anchors), crease_surface
 
 
 def _closest_on_triangle(p, a, b, c):
@@ -882,6 +893,42 @@ def _closest_on_segment_pt(p, a, b):
     return a + t * ab
 
 
+def crease_faces(verts, faces, crease_deg=35.0):
+    """Per-face crease classification: (len(faces),) bool array where True means the face has
+    at least one edge diverging >crease_deg from a neighbor. Used to tag surface voxels for
+    material assignment. Uses the same edge-adjacency logic as mesh_crease_features but
+    returns a boolean per face, not the edge/corner geometry."""
+    from collections import defaultdict
+    if len(faces) == 0:
+        return np.zeros(0, bool)
+    q = max(1e-9, 1e-5 * float(np.ptp(verts, axis=0).max()))
+    vkeys = np.round(verts / q).astype(np.int64)
+    canon = {}
+    vid_of = np.empty(len(verts), np.int64)
+    for i, k in enumerate(map(tuple, vkeys.tolist())):
+        vid_of[i] = canon.setdefault(k, len(canon))
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]],
+                  verts[faces[:, 2]] - verts[faces[:, 0]])
+    ln = np.linalg.norm(fn, axis=1)
+    unit = fn / np.where(ln[:, None] < 1e-20, 1.0, ln[:, None])
+    degenerate = ln < 1e-9
+    e2f = defaultdict(list)
+    for fi in range(len(faces)):
+        if degenerate[fi]:
+            continue
+        a, b, c = int(vid_of[faces[fi, 0]]), int(vid_of[faces[fi, 1]]), int(vid_of[faces[fi, 2]])
+        for u, v in ((a, b), (b, c), (c, a)):
+            if u != v:
+                e2f[(u, v) if u < v else (v, u)].append(fi)
+    cos_c = math.cos(math.radians(crease_deg))
+    is_crease = np.zeros(len(faces), bool)
+    for (u, v), fis in e2f.items():
+        if len(fis) == 2 and float(unit[fis[0]] @ unit[fis[1]]) < cos_c:
+            is_crease[fis[0]] = True
+            is_crease[fis[1]] = True
+    return is_crease
+
+
 def mesh_crease_features(verts, faces, crease_deg=35.0):
     """Extract sharp FEATURES from mesh topology, in the SAME coord space as `verts`:
       edges   -- (E,2,3) endpoints of crease edges: an edge shared by two faces whose normals
@@ -1024,7 +1071,7 @@ def feature_snap_anchors(anchors, edges, corners, radius):
 
 def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
              smooth_normals=True, min_thickness=0, crease_deg=35.0, preserve_features=True):
-    """Full voxelization -> (voxels, anchors).
+    """Full voxelization -> (voxels, anchors, labels).
 
     solid_mode='contain' (default): mesh-tight interior (center-in-mesh z-parity) UNIONED
         with the conservative SAT surface, so THIN features (< the interior sampling can
@@ -1040,15 +1087,19 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     Anchors ({surface corner -> nearest mesh point}) always come from the SAT surface pass
     so the smoothing layer has a projection target for every boundary vertex.
 
+    labels: (N,) uint8 array, 1=base material, 2=crease-face material. Interior fill voxels
+    are always label 1 (only surface voxels can be crease-tagged).
+
     Internally the solid/interior occupancy stays a DENSE (grid,grid,grid) bool array end to
     end (see solid_by_containment) -- only the sparse SURFACE shell (bounded by mesh area,
     not grid^3) is ever a Python set of tuples. The final return converts the dense result to
     a compact (N,3) int64 coordinate array via np.argwhere (vectorized, no per-voxel Python
     object churn), not a Python set -- for a solid shape N can be ~all of grid^3, and a
     coordinate array costs ~24 B/entry vs ~190 B/entry for a set of tuples."""
+    cface = crease_faces(verts, faces, crease_deg)
     cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
-    surface, anchors = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
-                                        cnormals=cn)
+    surface, anchors, crease_surface = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
+                                        cnormals=cn, crease_face=cface)
     if not surface:
         raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
     if want_anchors and preserve_features and anchors:
@@ -1097,7 +1148,14 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
-    return voxels, anchors
+    # Compute per-voxel material labels: 1=base, 2=crease
+    labels = np.ones(len(voxels), np.uint8)
+    if crease_surface is not None:
+        crease_occ = np.zeros((grid, grid, grid), bool)
+        for (x, y, z) in crease_surface:
+            crease_occ[x, y, z] = True
+        labels[crease_occ[voxels[:, 0], voxels[:, 1], voxels[:, 2]]] = 2
+    return voxels, anchors, labels
 
 
 def anchor_smooth_fn(anchors, delta=(0, 0, 0)):

@@ -35,7 +35,7 @@ MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
                  grid=None, want_anchors=False, max_grid=256, min_thickness=2,
                  rotate_to_z_up=True, crease_deg=35.0):
-    """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
+    """.obj -> (voxels, smooth_fn, labels) in construct-local coords (min corner near CORE_ORIGIN).
 
     size           core size name (XS..XXL); sets the voxel resolution unless `grid`.
     fill_fraction  fraction of the core edge the longest mesh axis fills (0<f<=1) --
@@ -49,6 +49,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
                    applied before voxelizing so all downstream logic is consistent.
     crease_deg    edge-sharpness threshold: faces diverging > this angle are crease-snapped
                   (lower = catches gentler edges, 10-60 range typical; default 35).
+    labels        (N,) uint8 array: 1=base material, 2=crease-face material.
     """
     core_vox = E.core_build_voxels(size)          # true voxel resolution (4x world size)
     if grid is None:
@@ -76,7 +77,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     if rotate_to_z_up:
         verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
-    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
+    solid, anchors, labels = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness,
                                  crease_deg=crease_deg)
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core.
@@ -94,7 +95,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     smooth_fn = None
     if want_anchors and anchors:
         smooth_fn = VX.anchor_smooth_fn(anchors, delta=d)   # shifts key AND target by d
-    return voxels, smooth_fn
+    return voxels, smooth_fn, labels
 
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
@@ -102,7 +103,7 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
                      max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
     onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
-    voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
+    voxels, smooth_fn, labels = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
                                      max_grid=max_grid, min_thickness=min_thickness,
                                      rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
@@ -199,7 +200,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
-    solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth,
+    solid, anchors, labels = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth,
                                  crease_deg=crease_deg)
     # solid is a compact (N,3) int64 array (see voxelize_obj) -- shift with vectorized numpy,
     # not a per-voxel Python loop/set-rebuild (this path can carry the same near-grid^3
