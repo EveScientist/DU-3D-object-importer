@@ -1150,11 +1150,12 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
     # Compute per-voxel material labels: 1=base, 2=crease
     labels = np.ones(len(voxels), np.uint8)
-    if crease_surface is not None:
-        crease_occ = np.zeros((grid, grid, grid), bool)
-        for (x, y, z) in crease_surface:
-            crease_occ[x, y, z] = True
-        labels[crease_occ[voxels[:, 0], voxels[:, 1], voxels[:, 2]]] = 2
+    if crease_surface is not None and len(crease_surface):
+        crease_arr = np.array(list(crease_surface), np.int32)
+        if len(crease_arr):
+            crease_occ = np.zeros((grid, grid, grid), bool)
+            crease_occ[tuple(crease_arr.T)] = True  # vectorized indexing (faster than loop)
+            labels[crease_occ[voxels[:, 0], voxels[:, 1], voxels[:, 2]]] = 2
     return voxels, anchors, labels
 
 

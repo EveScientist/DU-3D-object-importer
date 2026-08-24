@@ -29,7 +29,7 @@ import struct
 import numpy as np
 
 MAT_HCCARBON = (3417309861, 'hcCarbon')
-MAT_HCCARBON_B = (3417309861, 'hcCarbon')  # Placeholder: same hash, second mapping slot
+MAT_HCCARBON_B = (1297267071, 'hcAlLiMa')  # Matte Al-Li panel material from 3850_export.blueprint
 MAT_DEBUG1 = (157903047, 'Debug1\x00\x00')
 
 CELL_MAGIC = 0x27b8a013
@@ -293,7 +293,9 @@ def global_material_grid(voxels, labels, label_to_matidx):
     lo = tuple(int(arr[:, i].min()) for i in range(3))
     dim = tuple(int(arr[:, i].max()) - lo[i] + 1 for i in range(3))
     g = np.zeros(dim, np.int8)  # 0=empty
-    mat_indices = np.array([label_to_matidx.get(int(l), 0) for l in labels], np.int8)
+    mat_indices = np.zeros(len(labels), np.int8)  # vectorized label->idx mapping
+    for label, idx in label_to_matidx.items():
+        mat_indices[labels == label] = idx
     g[arr[:, 0] - lo[0], arr[:, 1] - lo[1], arr[:, 2] - lo[2]] = mat_indices
     return g, lo, dim
 
