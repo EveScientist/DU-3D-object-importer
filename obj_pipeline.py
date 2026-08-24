@@ -425,7 +425,7 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
             if d == [0, 0, 0]:
                 return None
             return (126 + d[0], 126 + d[1], 126 + d[2])
-    mat = material or du_semantic.MAT_HCCARBON
+    mat = material or du_semantic.MAT_HCCARBON_B  # TEST: using hcAlLiMa to verify material
     proto = copy.deepcopy(json.load(open(record_template))['VoxelData'][0])
     # MINIMAL octree derived from the ACTUAL PLACED cells (vox_abs), so the h3 records land on
     # the chunks that really hold the content -- must track the centering/`place` offset, NOT

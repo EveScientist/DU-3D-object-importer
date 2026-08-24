@@ -135,7 +135,7 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
-    mat_base = material or du_semantic.MAT_HCCARBON
+    mat_base = material or du_semantic.MAT_HCCARBON_B  # TEST: using hcAlLiMa to verify material
     materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
     want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn if smooth else None,
                                  material=material, size=size, core_type=core_type,
@@ -246,7 +246,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         s = T.smallest_core_for(extent)
         voxels, d = _place_in_core(solid, s)
         sm = VX.anchor_smooth_fn(anchors, delta=d) if smooth else None
-        mat_base = material or du_semantic.MAT_HCCARBON
+        mat_base = material or du_semantic.MAT_HCCARBON_B  # TEST: using hcAlLiMa to verify material
         materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
         want = P.build_blueprint_sem(out_base + '.blueprint', voxels, name,
                                      smooth_fn=sm, material=material, size=s, core_type=core_type,
@@ -272,7 +272,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
                          if all(0 <= k[i] - base[i] < cv for i in range(3))}
                 sm = VX.anchor_smooth_fn(tanch, delta=d)
             fn = f'{out_base}_{tijk[0]}_{tijk[1]}_{tijk[2]}.blueprint'
-            mat_base = material or du_semantic.MAT_HCCARBON
+            mat_base = material or du_semantic.MAT_HCCARBON_B  # TEST: using hcAlLiMa to verify material
             materials = [mat_base, du_semantic.MAT_HCCARBON_B] if second_material else None
             P.build_blueprint_sem(fn, voxels, f'{name} [{tijk[0]},{tijk[1]},{tijk[2]}]',
                                   smooth_fn=sm, material=material, size=size, core_type=core_type,
