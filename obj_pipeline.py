@@ -496,8 +496,9 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
                                      bbox=bbox)
     json.dump(out, open(out_path, 'w'))
     elapsed = time.time() - t0
+    n_voxels = len(abs_arr) if len(abs_arr) else 0
     print(f"[build_blueprint_sem] Blueprint complete: {len(entries)} LOD entries, "
-          f"{len(voxels)} voxels, {elapsed:.1f}s, {len(entries)/max(1,elapsed):.1f} entries/sec")
+          f"{n_voxels} voxels, {elapsed:.1f}s, {len(entries)/max(1,elapsed):.1f} entries/sec")
     return want
 
 
