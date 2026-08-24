@@ -1176,15 +1176,10 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
         print(f"[voxelize] Creating hollow shell (thickness={max(1, min_thickness)}, grid={grid}^3={grid**3//1_000_000}M)...")
         occ = hollow_shell(solid, grid, max(1, min_thickness))
         print(f"[voxelize] Hollow shell complete in {time.time()-t_hollow:.1f}s ({np.sum(occ)} voxels)")
-        # Compute anchors for the INNER surface (boundary between shell and eroded interior),
-        # so the inside is also smooth/deflected. Merge with outer anchors.
-        if want_anchors and anchors:
-            print(f"[voxelize] Computing inner boundary anchors...")
-            inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
-                                                    cnormals=cn, normals=None)
-            if inner_anchors:
-                anchors.update(inner_anchors)
-                print(f"[voxelize] Inner anchors: {len(inner_anchors)}")
+        # NOTE: Skipping inner boundary anchors for hollow shapes by default.
+        # Computing anchors for the inner surface is expensive (projects 1M+ corners)
+        # and mostly cosmetic. Outer surface anchors are sufficient for most use cases.
+        # To enable, set want_anchors_inner=True (not exposed in UI).
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
