@@ -373,7 +373,10 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     boxes rendered). The octree layout per core comes from core_octree_params (levels
     h3..CoreSize.height(), chunk0=2^(height-1), OFF=chunk0*32) + the minimal LOD set."""
     import json, copy
+    import time
     import du_semantic, du_envelope
+    t0 = time.time()
+    print(f"[build_blueprint_sem] Starting blueprint generation for {len(voxels)} voxels...")
     size = size.upper()
     core_h, chunk0, _ = core_octree_params(size)
     # PLACEMENT: the core's placement element sits at world vsz/2 == cell chunk0*32 (donor
@@ -492,6 +495,9 @@ def build_blueprint_sem(out_path, voxels, name, smooth_fn=None, yseam_payload=Tr
     out = du_envelope.build_envelope(entries, size=size, core_type=core_type, name=name,
                                      bbox=bbox)
     json.dump(out, open(out_path, 'w'))
+    elapsed = time.time() - t0
+    print(f"[build_blueprint_sem] Blueprint complete: {len(entries)} LOD entries, "
+          f"{len(voxels)} voxels, {elapsed:.1f}s, {len(entries)/max(1,elapsed):.1f} entries/sec")
     return want
 
 

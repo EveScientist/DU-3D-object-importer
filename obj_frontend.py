@@ -52,6 +52,19 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
                   (lower = catches gentler edges, 10-60 range typical; default 35).
     labels        (N,) uint8 array: 1=base material, 2=crease-face material.
     """
+    import time
+    try:
+        import psutil
+        process = psutil.Process()
+        def log_mem(stage):
+            mem_mb = process.memory_info().rss / 1024 / 1024
+            print(f"[voxelize_obj] {stage} -- {mem_mb:.1f} MB")
+    except ImportError:
+        def log_mem(stage):
+            print(f"[voxelize_obj] {stage}")
+
+    log_mem("START")
+    t0 = time.time()
     core_vox = E.core_build_voxels(size)          # true voxel resolution (4x world size)
     if grid is None:
         grid = max(1, int(round(core_vox * fill_fraction)))
@@ -71,16 +84,25 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
         print(f"[obj] grid {grid} capped to {safe} to stay within the memory budget "
               f"(~{MAX_SOLID_VOXELS // 1_000_000}M voxels)")
         grid = safe
+    print(f"[obj] grid={grid} (max ~{grid**3 // 1_000_000}M voxels), hollow={hollow}, min_thickness={min_thickness}")
+
+    log_mem("MESH LOAD")
     verts, faces = VX.load_mesh(obj_path)
+    log_mem(f"LOADED: {len(verts)} verts, {len(faces)} faces")
+
     # rotate Y-up (OBJ/STL convention) to Z-up (DU convention): 90° about X-axis.
     # R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]] maps (x,y,z) -> (x,-z,y) -- stands up Y-tall
     # shapes and doesn't mirror (180° rotation avoids handedness flip vs naive swap).
     if rotate_to_z_up:
         verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
+    log_mem("FITTED TO GRID")
+
+    print("[obj] VOXELIZING (surface detection + fill)...")
     solid, anchors, labels = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness,
                                  crease_deg=crease_deg)
+    log_mem(f"VOXELIZED: {len(solid)} voxels")
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core.
     # `solid` is already a compact (N,3) int64 coordinate array (VX.voxelize returns
     # np.argwhere of a dense occupancy array, not a Python set -- see du_voxelize.voxelize

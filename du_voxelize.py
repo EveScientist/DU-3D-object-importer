@@ -1165,17 +1165,24 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     if hollow:
         # shell of at least min_thickness voxels (>=1). Thin features stay solid because
         # erosion clears them, so the minimum never over-thins sharp edges.
+        import time
+        t_hollow = time.time()
+        print(f"[voxelize] Creating hollow shell (thickness={max(1, min_thickness)}, grid={grid}^3={grid**3//1_000_000}M)...")
         occ = hollow_shell(solid, grid, max(1, min_thickness))
+        print(f"[voxelize] Hollow shell complete in {time.time()-t_hollow:.1f}s ({np.sum(occ)} voxels)")
         # Compute anchors for the INNER surface (boundary between shell and eroded interior),
         # so the inside is also smooth/deflected. Merge with outer anchors.
         if want_anchors and anchors:
+            print(f"[voxelize] Computing inner boundary anchors...")
             inner_anchors = _inner_boundary_anchors(occ, grid, verts, faces, want_anchors=True,
                                                     cnormals=cn, normals=None)
             if inner_anchors:
                 anchors.update(inner_anchors)
+                print(f"[voxelize] Inner anchors: {len(inner_anchors)}")
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
+    print(f"[voxelize] FINAL: {len(voxels)} voxels extracted from {occ.dtype} occupancy grid")
     # Compute per-voxel material labels: 1=base, 2=crease
     labels = np.ones(len(voxels), np.uint8)
     if crease_surface is not None and len(crease_surface):
