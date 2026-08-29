@@ -237,8 +237,7 @@ def build_cell(voxels, inner_origin, material=MAT_HCCARBON, pos_fn=None,
                 k += blk
         i = j
 
-    if mapping is None:
-        mapping = [(material[0], material[1], mat_idx)]
+    mapping = [(material[0], material[1], mat_idx)]
     out += struct.pack('<I', len(mapping))
     for mid, name, idx in mapping:
         nm = name.ljust(8, '\x00')[:8].encode()
