@@ -1182,52 +1182,6 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
-    n_before = len(voxels)
-
-    # Spike removal: identify and remove isolated protruding voxels that cause jagged artifacts
-    # on complex curved surfaces. Use morphological opening (erode then dilate) to smooth noise.
-    # This is gentler than removing individual spikes and better preserves real geometry.
-    try:
-        from scipy.ndimage import binary_opening
-        occ = binary_opening(occ, structure=np.ones((3, 3, 3), dtype=bool))
-    except ImportError:
-        # Fallback: manual implementation of 1 iteration of opening
-        # Erode: remove voxels with fewer than 7 occupied neighbors (26-neighbor connectivity)
-        occ_int = occ.astype(np.int32)
-        neighbor_count = np.zeros_like(occ_int)
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                for dz in [-1, 0, 1]:
-                    if dx == 0 and dy == 0 and dz == 0:
-                        continue
-                    # Pad the array to avoid boundary wrap-around
-                    padded = np.pad(occ_int, 1, mode='constant', constant_values=0)
-                    neighbor_count += padded[1+dx:occ_int.shape[0]+1+dx,
-                                           1+dy:occ_int.shape[1]+1+dy,
-                                           1+dz:occ_int.shape[2]+1+dz]
-        # Erode: keep only voxels with many occupied neighbors
-        eroded = occ & (neighbor_count >= 20)  # >= 20 out of 26 neighbors
-        # Dilate: add back voxels adjacent to eroded regions
-        if np.any(eroded):
-            dilated = eroded.copy()
-            eroded_padded = np.pad(eroded, 1, mode='constant', constant_values=False)
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    for dz in [-1, 0, 1]:
-                        if dx == 0 and dy == 0 and dz == 0:
-                            continue
-                        shifted = eroded_padded[1+dx:eroded_padded.shape[0]-1+dx,
-                                               1+dy:eroded_padded.shape[1]-1+dy,
-                                               1+dz:eroded_padded.shape[2]-1+dz]
-                        dilated |= shifted
-            occ = dilated
-        else:
-            occ = eroded
-
-    voxels = np.argwhere(occ)
-    n_after = len(voxels)
-    if n_after < n_before:
-        print(f"[voxelize] Spike removal: removed {n_before - n_after} isolated voxels")
     print(f"[voxelize] FINAL: {len(voxels)} voxels extracted from {occ.dtype} occupancy grid")
     return voxels, anchors
 
