@@ -59,8 +59,12 @@ def _opts(form):
             return int(d)
     size = form.get('size', 'M').upper()
     core_type = form.get('core_type', 'static')
+    size = size if size in CORE_SIZES else 'M'
+    # Default max_grid scales with core size: larger cores default to higher resolution
+    # to avoid capping the voxelization grid and losing detail
+    default_max_grid = min(E.core_build_voxels(size) // 2, 512)  # 50% of core, capped at 512
     return dict(
-        size=size if size in CORE_SIZES else 'M',
+        size=size,
         core_type=core_type if core_type in CORE_TYPES else 'static',
         mode=form.get('mode', 'scale'),
         hollow=form.get('hollow') == 'on',
@@ -68,7 +72,7 @@ def _opts(form):
         rotate_to_z_up=form.get('rotate_to_z_up') == 'on',  # default on (checked by default in HTML)
         crease_deg=min(max(_f('crease_deg', 35.0), 5.0), 80.0),  # snappiness: 5-80°
         fill=min(max(_f('fill', 0.9), 0.05), 1.0),
-        max_grid=min(max(_i('max_grid', 256), 32), 512),
+        max_grid=min(max(_i('max_grid', default_max_grid), 32), 512),
         min_thickness=min(max(_i('min_thickness', 2), 1), 16),
     )
 
