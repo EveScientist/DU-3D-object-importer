@@ -35,21 +35,23 @@ MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
 
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
                  grid=None, want_anchors=False, max_grid=256, min_thickness=2,
-                 rotate_to_z_up=True, crease_deg=35.0):
+                 rotate_to_z_up=True, crease_deg=35.0, voxelization_method='sat'):
     """.obj -> (voxels, smooth_fn) in construct-local coords (min corner near CORE_ORIGIN).
 
-    size           core size name (XS..XXL); sets the voxel resolution unless `grid`.
-    fill_fraction  fraction of the core edge the longest mesh axis fills (0<f<=1) --
-                   the SCALING control the user picks.
-    grid           override: absolute voxel resolution of the longest mesh axis.
-    hollow         False = watertight solid (caves/holds preserved as modeled voids);
-                   True = surface shell only.
-    want_anchors   also return a smooth_fn projecting each surface vertex to the nearest
-                   mesh point (the "forcibly smooth a jagged edge" deflection), else None.
-    rotate_to_z_up rotate the mesh 90° about X-axis (most OBJ/STL are Y-up, DU is Z-up);
-                   applied before voxelizing so all downstream logic is consistent.
-    crease_deg    edge-sharpness threshold: faces diverging > this angle are crease-snapped
-                  (lower = catches gentler edges, 10-60 range typical; default 35).
+    size                 core size name (XS..XXL); sets the voxel resolution unless `grid`.
+    fill_fraction        fraction of the core edge the longest mesh axis fills (0<f<=1) --
+                         the SCALING control the user picks.
+    grid                 override: absolute voxel resolution of the longest mesh axis.
+    hollow               False = watertight solid (caves/holds preserved as modeled voids);
+                         True = surface shell only.
+    want_anchors         also return a smooth_fn projecting each surface vertex to the nearest
+                         mesh point (the "forcibly smooth a jagged edge" deflection), else None.
+    rotate_to_z_up       rotate the mesh 90° about X-axis (most OBJ/STL are Y-up, DU is Z-up);
+                         applied before voxelizing so all downstream logic is consistent.
+    crease_deg          edge-sharpness threshold: faces diverging > this angle are crease-snapped
+                        (lower = catches gentler edges, 10-60 range typical; default 35).
+    voxelization_method 'sat' (default): SAT-based surface detection + containment fill.
+                        'flood': flood-fill from outside (more robust on complex geometry).
     """
     import time
     try:
@@ -97,10 +99,10 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     log_mem("FITTED TO GRID")
 
-    print("[obj] VOXELIZING (surface detection + fill)...")
+    print(f"[obj] VOXELIZING ({voxelization_method} method)...")
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness,
-                                 crease_deg=crease_deg)
+                                 crease_deg=crease_deg, voxelization_method=voxelization_method)
     log_mem(f"VOXELIZED: {len(solid)} voxels")
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core.
     # `solid` is already a compact (N,3) int64 coordinate array (VX.voxelize returns
@@ -122,13 +124,16 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
 
 def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_fraction=0.9,
                      hollow=False, smooth=False, grid=None, name=None, material=None,
-                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0):
+                     max_grid=256, min_thickness=2, rotate_to_z_up=True, crease_deg=35.0,
+                     voxelization_method='sat'):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
-    onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set)."""
+    onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set).
+    voxelization_method: 'sat' (default) or 'flood' for alternative algorithm."""
     voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
                                      max_grid=max_grid, min_thickness=min_thickness,
-                                     rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
+                                     rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg,
+                                     voxelization_method=voxelization_method)
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
@@ -186,7 +191,8 @@ def preview_mesh(voxels, smooth_fn=None, deflect_cap=100 / 84.0):
 
 def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='static',
                       resolution=None, fill_fraction=0.9, hollow=False, smooth=False,
-                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0):
+                      name=None, material=None, rotate_to_z_up=True, crease_deg=35.0,
+                      voxelization_method='sat'):
     """Unified entry: .obj -> one or many blueprints, by mode.
 
       mode='scale' : scale the mesh to fit the SPECIFIED `size` core (fill_fraction). One
@@ -198,6 +204,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
                      manifest listing each tile's integer core offset (place adjacent
                      in-game). Seam smoothing is per-core (constructs are independent).
 
+    voxelization_method: 'sat' (default) or 'flood' for alternative algorithm.
     Returns a manifest dict.
     """
     import os
@@ -212,7 +219,8 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
         n, want = obj_to_blueprint(obj_path, out_base + '.blueprint', size=size,
                                    core_type=core_type, fill_fraction=fill_fraction,
                                    hollow=hollow, smooth=smooth, name=name, material=material,
-                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
+                                   rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg,
+                                   voxelization_method=voxelization_method)
         return dict(mode='scale', size=size, files=[out_base + '.blueprint'],
                     voxels=n, note=f'mesh scaled into {size} core')
 
@@ -223,7 +231,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
     grid = resolution or int(round(E.core_voxel_size('M') * fill_fraction))
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow, want_anchors=smooth,
-                                 crease_deg=crease_deg)
+                                 crease_deg=crease_deg, voxelization_method=voxelization_method)
     # solid is a compact (N,3) int64 array (see voxelize_obj) -- shift with vectorized numpy,
     # not a per-voxel Python loop/set-rebuild (this path can carry the same near-grid^3
     # voxel counts as 'scale' mode, so the same blowup/slowdown applies here too).

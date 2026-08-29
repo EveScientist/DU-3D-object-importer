@@ -139,6 +139,16 @@
         <input type="number" name="max_grid" min="32" max="512" step="16" value="256">
       </div>
       <div>
+        <label>Voxelization method <span class="hint">— SAT (default) for most meshes; Flood for complex curved shapes</span></label>
+        <select name="voxel_method">
+          <option value="sat" selected>SAT (fast, SAT-based surface)</option>
+          <option value="flood">Flood (robust for complex geometry)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
         <label>Snappiness <span class="hint">— edge sharpness (lower = gentler edges, higher = ignores faint creases)</span></label>
         <input type="range" name="crease_deg" min="5" max="80" step="1" value="35" id="snapSlider">
         <div style="font-size:12px; color:var(--mut); margin-top:4px;">Crease angle: <span id="snapValue">35</span>°</div>

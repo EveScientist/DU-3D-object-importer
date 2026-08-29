@@ -63,6 +63,8 @@ def _opts(form):
     # Default max_grid scales with core size: larger cores default to higher resolution
     # to avoid capping the voxelization grid and losing detail
     default_max_grid = min(E.core_build_voxels(size) // 2, 512)  # 50% of core, capped at 512
+    voxel_method = form.get('voxel_method', 'sat').lower()
+    voxel_method = voxel_method if voxel_method in ('sat', 'flood') else 'sat'
     return dict(
         size=size,
         core_type=core_type if core_type in CORE_TYPES else 'static',
@@ -74,6 +76,7 @@ def _opts(form):
         fill=min(max(_f('fill', 0.9), 0.05), 1.0),
         max_grid=min(max(_i('max_grid', default_max_grid), 32), 512),
         min_thickness=min(max(_i('min_thickness', 2), 1), 16),
+        voxel_method=voxel_method,
     )
 
 
@@ -97,7 +100,8 @@ def preview():
         voxels, smooth_fn = F.voxelize_obj(
             obj_path, size=o['size'], fill_fraction=o['fill'], hollow=o['hollow'],
             want_anchors=o['smooth'], max_grid=pv_grid, min_thickness=o['min_thickness'],
-            rotate_to_z_up=o['rotate_to_z_up'], crease_deg=o['crease_deg'])
+            rotate_to_z_up=o['rotate_to_z_up'], crease_deg=o['crease_deg'],
+            voxelization_method=o['voxel_method'])
         verts, tris = F.preview_mesh(voxels, smooth_fn if o['smooth'] else None)
         full = min(int(round(E.core_build_voxels(o['size']) * o['fill'])), o['max_grid'])
         return jsonify(v=[round(x, 3) for x in verts], f=tris,
@@ -139,14 +143,15 @@ def convert():
         if mode == 'auto':
             m = F.obj_to_blueprints(obj_path, os.path.join(WORKDIR, token), mode='auto',
                                     core_type=core_type, resolution=max_grid, hollow=hollow,
-                                    smooth=smooth, name=stem)
+                                    smooth=smooth, name=stem, voxelization_method=o['voxel_method'])
             produced = m['files'][0]
             size = m['size']
         else:
             F.obj_to_blueprint(obj_path, out_path, size=size, core_type=core_type,
                                fill_fraction=fill, hollow=hollow, smooth=smooth,
                                name=stem, max_grid=max_grid, min_thickness=min_thickness,
-                               rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg)
+                               rotate_to_z_up=rotate_to_z_up, crease_deg=crease_deg,
+                               voxelization_method=o['voxel_method'])
             produced = out_path
         return send_file(produced, as_attachment=True,
                          download_name=f'{stem}_{size}.blueprint',

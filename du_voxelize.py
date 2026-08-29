@@ -1103,13 +1103,103 @@ def feature_snap_anchors(anchors, edges, corners, radius):
     return out
 
 
+def _flood_fill_exterior(grid, surface_set):
+    """Flood-fill from boundary to mark external space. Surface voxels act as barriers.
+    Returns a bool array where True=external, False=interior."""
+    external = np.zeros((grid, grid, grid), bool)
+    surface_grid = np.zeros((grid, grid, grid), bool)
+    for (x, y, z) in surface_set:
+        if 0 <= x < grid and 0 <= y < grid and 0 <= z < grid:
+            surface_grid[x, y, z] = True
+
+    # Start flood-fill from boundary voxels
+    queue = []
+    visited = np.zeros((grid, grid, grid), bool)
+
+    # Add all boundary-adjacent voxels to queue (they're definitely external)
+    for i in range(grid):
+        for j in range(grid):
+            for k in [0, grid - 1]:
+                if not visited[i, j, k]:
+                    queue.append((i, j, k))
+                    visited[i, j, k] = True
+                    external[i, j, k] = True
+            for k in [0, grid - 1]:
+                if not visited[i, k, j]:
+                    queue.append((i, k, j))
+                    visited[i, k, j] = True
+                    external[i, k, j] = True
+            for k in [0, grid - 1]:
+                if not visited[k, i, j]:
+                    queue.append((k, i, j))
+                    visited[k, i, j] = True
+                    external[k, i, j] = True
+
+    # BFS: expand external region, stopped by surface voxels
+    idx = 0
+    while idx < len(queue):
+        x, y, z = queue[idx]
+        idx += 1
+
+        for dx, dy, dz in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]:
+            nx, ny, nz = x + dx, y + dy, z + dz
+            if 0 <= nx < grid and 0 <= ny < grid and 0 <= nz < grid:
+                if not visited[nx, ny, nz]:
+                    visited[nx, ny, nz] = True
+                    if not surface_grid[nx, ny, nz]:
+                        external[nx, ny, nz] = True
+                        queue.append((nx, ny, nz))
+
+    return external
+
+
+def voxelize_flood_fill(verts, faces, grid, hollow=False, want_anchors=True,
+                        smooth_normals=True, min_thickness=0, crease_deg=35.0, preserve_features=True):
+    """Voxelization via flood-fill from outside (alternative to SAT-based contain/fill).
+
+    Flood-fills from the boundary to identify external space, treating surface voxels as
+    barriers. Interior = everything not marked external. Can be more robust on complex,
+    non-convex, or non-manifold geometry compared to ray-parity containment tests."""
+    cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
+    surface, anchors, _ = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
+                                        cnormals=cn, crease_face=None)
+    if not surface:
+        raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
+
+    # Flood-fill from outside to find external space
+    external = _flood_fill_exterior(grid, surface)
+    solid = ~external  # Interior = NOT external
+
+    if want_anchors and preserve_features and anchors:
+        edges, corners = mesh_crease_features(verts, faces, crease_deg)
+        anchors = feature_snap_anchors(anchors, edges, corners, radius=100.0 / 84.0)
+
+    if hollow:
+        import time
+        t_hollow = time.time()
+        print(f"[voxelize_flood_fill] Creating hollow shell (thickness={max(1, min_thickness)}, grid={grid}^3={grid**3//1_000_000}M)...")
+        occ = hollow_shell(solid, grid, max(1, min_thickness))
+        print(f"[voxelize_flood_fill] Hollow shell complete in {time.time()-t_hollow:.1f}s ({np.sum(occ)} voxels)")
+    else:
+        occ = solid
+
+    voxels = np.argwhere(occ)
+    print(f"[voxelize_flood_fill] FINAL: {len(voxels)} voxels extracted from occupancy grid")
+    return voxels, anchors
+
+
 def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='contain',
-             smooth_normals=True, min_thickness=0, crease_deg=35.0, preserve_features=True):
+             smooth_normals=True, min_thickness=0, crease_deg=35.0, preserve_features=True,
+             voxelization_method='sat'):
     """Full voxelization -> (voxels, anchors, labels).
+
+    voxelization_method='sat' (default): SAT-based surface detection + containment/fill.
+    voxelization_method='flood': flood-fill from outside (more robust on complex geometry).
 
     solid_mode='contain' (default): mesh-tight interior (center-in-mesh z-parity) UNIONED
         with the conservative SAT surface, so THIN features (< the interior sampling can
         catch) are still represented; smoothing then pulls the surface layer onto the mesh.
+        (Ignored when voxelization_method='flood')
     solid_mode='band': conservative SAT surface + span fill only.
     hollow=True: surface shell only (no interior), for hulls with a modeled outer skin.
     smooth_normals=True: anchor targets projected onto the PN-triangle surface using
@@ -1130,6 +1220,12 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     a compact (N,3) int64 coordinate array via np.argwhere (vectorized, no per-voxel Python
     object churn), not a Python set -- for a solid shape N can be ~all of grid^3, and a
     coordinate array costs ~24 B/entry vs ~190 B/entry for a set of tuples."""
+
+    if voxelization_method == 'flood':
+        return voxelize_flood_fill(verts, faces, grid, hollow=hollow, want_anchors=want_anchors,
+                                   smooth_normals=smooth_normals, min_thickness=min_thickness,
+                                   crease_deg=crease_deg, preserve_features=preserve_features)
+
     cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
     surface, anchors, _ = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
                                         cnormals=cn, crease_face=None)

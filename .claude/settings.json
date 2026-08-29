@@ -4,7 +4,17 @@
       "Bash(python3 -c ' *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(python3)"
+      "Bash(python3)",
+      "PowerShell(git add du_semantic.py du_voxelize.py obj_frontend.py obj_pipeline.py webapp/app.py webapp/templates/index.html)",
+      "PowerShell(git push origin main)",
+      "PowerShell(python -m py_compile du_semantic.py)",
+      "PowerShell(git add du_semantic.py)",
+      "PowerShell(git commit -m \"Fix: remove mapping parameter reference from build_cell\")",
+      "PowerShell(python -m py_compile webapp/app.py)",
+      "PowerShell(git add webapp/app.py)",
+      "PowerShell(python -m py_compile du_voxelize.py)",
+      "PowerShell(git add du_voxelize.py)",
+      "Bash(python -m py_compile du_voxelize.py obj_frontend.py webapp/app.py)"
     ]
   }
 }
