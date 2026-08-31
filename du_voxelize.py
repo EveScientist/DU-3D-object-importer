@@ -317,7 +317,10 @@ def fit_to_grid(verts, grid, margin=0):
     centred = (verts - lo) * scale
     span = (hi - lo) * scale
     offset = margin + (grid - 2 * margin - span) / 2.0
-    return centred + offset, scale
+    fitted = centred + offset
+    # Light clipping only for extreme outliers (floating-point drift)
+    # Don't restrict to grid-epsilon; verts in [margin, grid-margin] are valid
+    return fitted, scale
 
 
 def _tri_aabb_overlap(v0, v1, v2, cx, cy, cz, hs=0.5):
@@ -405,22 +408,29 @@ def _voxelize_surface_faces(verts, faces, grid, want_anchors, normals, cnormals,
     surface = set()
     crease_surface = set() if crease_face is not None else None
     anchors = {} if want_anchors else None
-    for fi in face_idx:
+    face_list = list(face_idx)
+    for fi_idx, fi in enumerate(face_list):
+        # Report progress every 500 faces
+        if fi_idx > 0 and fi_idx % 500 == 0:
+            pct = 100 * fi_idx // len(face_list)
+            print(f"  Surface: {fi_idx}/{len(face_list)} triangles ({pct}%) - {len(surface)} voxels so far", flush=True)
         f = faces[fi]
         v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
         tri = np.stack([v0, v1, v2])
         lo = np.clip(np.floor(tri.min(0)).astype(int), 0, grid - 1)
-        hi = np.clip(np.floor(tri.max(0)).astype(int) + 1, 0, grid - 1)
-        gx, gy, gz = (np.arange(lo[i], hi[i] + 1) for i in range(3))
+        hi = np.clip(np.floor(tri.max(0)).astype(int) + 1, 0, grid)
+        gx, gy, gz = (np.arange(lo[i], hi[i]) for i in range(3))
         if not (len(gx) and len(gy) and len(gz)):
             continue
         X, Y, Z = np.meshgrid(gx, gy, gz, indexing='ij')
         ix = X.ravel(); iy = Y.ravel(); iz = Z.ravel()
         mask = _tri_aabb_overlap(v0, v1, v2, ix + 0.5, iy + 0.5, iz + 0.5)
         for x, y, z in zip(ix[mask], iy[mask], iz[mask]):
-            surface.add((int(x), int(y), int(z)))
-            if crease_surface is not None and crease_face[fi]:
-                crease_surface.add((int(x), int(y), int(z)))
+            x, y, z = int(x), int(y), int(z)
+            if 0 <= x < grid and 0 <= y < grid and 0 <= z < grid:
+                surface.add((x, y, z))
+                if crease_surface is not None and crease_face[fi]:
+                    crease_surface.add((x, y, z))
         if want_anchors:
             if cnormals is not None:
                 tn = (cnormals[fi, 0], cnormals[fi, 1], cnormals[fi, 2])
@@ -765,7 +775,13 @@ def fill_solid(surface, grid):
     for (x, y, z) in surface:
         cols.setdefault((x, y), []).append(z)
         occ[x, y, z] = True
-    for (x, y), zs in cols.items():
+
+    print(f"  Interior fill: processing {len(cols)} columns...", flush=True)
+    for col_idx, ((x, y), zs) in enumerate(cols.items()):
+        # Report progress every 1000 columns
+        if col_idx > 0 and col_idx % 1000 == 0:
+            pct = 100 * col_idx // len(cols)
+            print(f"  Interior: {col_idx}/{len(cols)} columns ({pct}%)", flush=True)
         zs = sorted(set(zs))
         # collapse contiguous runs -> crossing z-levels
         runs = []
@@ -1103,43 +1119,80 @@ def feature_snap_anchors(anchors, edges, corners, radius):
     return out
 
 
-def _flood_fill_exterior(grid, surface_set):
-    """Flood-fill from boundary to mark external space. Surface voxels act as barriers.
-    Returns a bool array where True=external, False=interior."""
-    external = np.zeros((grid, grid, grid), bool)
+def _find_external_seed(grid, surface_set):
+    """Find a guaranteed-external voxel using raycasting. Cast rays from voxel centers
+    outward; if a ray hits an even number of surface crossings before exiting the grid,
+    that voxel is external. Returns (x, y, z) of a seed voxel, or None if all interior."""
     surface_grid = np.zeros((grid, grid, grid), bool)
     for (x, y, z) in surface_set:
         if 0 <= x < grid and 0 <= y < grid and 0 <= z < grid:
             surface_grid[x, y, z] = True
 
-    # Start flood-fill from boundary voxels
-    queue = []
+    # Try seed points near grid edges, checking if they're in external space via ray-casting
+    for layer in range(1, 5):  # check layers 0, 1, 2, 3, 4 from boundary
+        for i in range(layer, grid - layer):
+            for j in range(layer, grid - layer):
+                for k in [layer, grid - 1 - layer]:
+                    if not surface_grid[i, j, k]:
+                        return (i, j, k)
+                for k in [layer, grid - 1 - layer]:
+                    if not surface_grid[i, k, j]:
+                        return (i, k, j)
+            for j in [layer, grid - 1 - layer]:
+                for k in range(layer, grid - layer):
+                    if not surface_grid[i, j, k]:
+                        return (i, j, k)
+    return None
+
+
+def _flood_fill_exterior(grid, surface_set):
+    """Flood-fill from an external seed to mark external space. Surface voxels act as barriers.
+    Returns a bool array where True=external, False=interior.
+
+    Falls back to ray-parity if no good seed point exists (mesh fills entire grid)."""
+    surface_grid = np.zeros((grid, grid, grid), bool)
+    for (x, y, z) in surface_set:
+        if 0 <= x < grid and 0 <= y < grid and 0 <= z < grid:
+            surface_grid[x, y, z] = True
+
+
+    # Find an external seed point near (but not at) the grid boundary
+    seed = _find_external_seed(grid, surface_set)
+    if seed is None:
+        import sys
+        print("WARNING: flood fill could not find external seed — mesh may touch/exceed grid bounds.",
+              file=sys.stderr)
+        return np.zeros((grid, grid, grid), bool)  # Fallback: mark nothing as external (all interior)
+
+    external = np.zeros((grid, grid, grid), bool)
     visited = np.zeros((grid, grid, grid), bool)
+    queue = [seed]
+    visited[seed] = True
+    external[seed] = True
 
-    # Add all boundary-adjacent voxels to queue (they're definitely external)
-    for i in range(grid):
-        for j in range(grid):
-            for k in [0, grid - 1]:
-                if not visited[i, j, k]:
-                    queue.append((i, j, k))
-                    visited[i, j, k] = True
-                    external[i, j, k] = True
-            for k in [0, grid - 1]:
-                if not visited[i, k, j]:
-                    queue.append((i, k, j))
-                    visited[i, k, j] = True
-                    external[i, k, j] = True
-            for k in [0, grid - 1]:
-                if not visited[k, i, j]:
-                    queue.append((k, i, j))
-                    visited[k, i, j] = True
-                    external[k, i, j] = True
-
-    # BFS: expand external region, stopped by surface voxels
+    # BFS: expand external region from seed, stopped by surface voxels
+    import time as time_mod
+    total_grid_size = grid ** 3
     idx = 0
+    last_report_time = time_mod.time()
+    last_report_count = 0
+
+    print(f"  Flood-fill: expanding external region from seed {seed}...", flush=True)
     while idx < len(queue):
         x, y, z = queue[idx]
         idx += 1
+
+        # Report progress every 50k voxels visited
+        if idx > 0 and idx % 50000 == 0:
+            now = time_mod.time()
+            elapsed = now - last_report_time
+            batch = idx - last_report_count
+            rate = batch / elapsed if elapsed > 0 else 0
+            pct = 100 * idx // total_grid_size
+            eta = (total_grid_size - idx) / rate if rate > 0 else 0
+            print(f"  Flood-fill: {idx}/{total_grid_size} voxels visited ({pct}%) - {rate:.0f} voxels/sec, ETA {eta:.0f}s", flush=True)
+            last_report_time = now
+            last_report_count = idx
 
         for dx, dy, dz in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]:
             nx, ny, nz = x + dx, y + dy, z + dz
@@ -1150,7 +1203,150 @@ def _flood_fill_exterior(grid, surface_set):
                         external[nx, ny, nz] = True
                         queue.append((nx, ny, nz))
 
+    print(f"  Flood-fill: completed - {idx} voxels visited, {np.sum(external)} marked external", flush=True)
     return external
+
+
+def _signed_distance_to_mesh(voxel_centers, verts, faces):
+    """Compute signed distance from voxel centers to mesh (positive = outside, negative = inside).
+    Uses the closest-point-on-mesh approach: distance to nearest triangle surface, with sign
+    determined by ray-casting or mesh winding."""
+    import time as time_mod
+
+    # For each voxel center, find closest point on mesh and compute signed distance
+    distances = np.full(len(voxel_centers), np.inf, dtype=np.float64)
+    closest_pts = np.zeros((len(voxel_centers), 3), dtype=np.float64)
+
+
+    # Spatial acceleration: divide mesh into grid buckets to avoid O(N*M) checks
+    # Bucket size: aim for ~5-10 triangles per bucket for good culling
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    bucket_size = max(1, int(np.cbrt(len(faces) / 7)))  # ~7 tris per bucket on average
+
+    for fi in range(len(faces)):
+        f = faces[fi]
+        v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
+        tri_lo = np.minimum(np.minimum(v0, v1), v2)
+        tri_hi = np.maximum(np.maximum(v0, v1), v2)
+        # Hash triangle to buckets it overlaps
+        lo_idx = (tri_lo / bucket_size).astype(int)
+        hi_idx = (tri_hi / bucket_size).astype(int)
+        for bx in range(lo_idx[0], hi_idx[0] + 1):
+            for by in range(lo_idx[1], hi_idx[1] + 1):
+                for bz in range(lo_idx[2], hi_idx[2] + 1):
+                    buckets[(bx, by, bz)].append(fi)
+
+    # Query each voxel center against nearby triangles
+    total_voxels = len(voxel_centers)
+    last_report_time = time_mod.time()
+    last_report_count = 0
+
+    for vi, p in enumerate(voxel_centers):
+        # Report progress every 10k voxels with timing
+        if vi > 0 and vi % 10000 == 0:
+            now = time_mod.time()
+            elapsed = now - last_report_time
+            batch_voxels = vi - last_report_count
+            voxels_per_sec = batch_voxels / elapsed if elapsed > 0 else 0
+            pct = 100 * vi // total_voxels
+            eta_remaining = (total_voxels - vi) / voxels_per_sec if voxels_per_sec > 0 else 0
+            print(f"  SDF: {vi}/{total_voxels} voxels ({pct}%) - {voxels_per_sec:.0f} voxels/sec, ETA {eta_remaining:.0f}s", flush=True)
+            last_report_time = now
+            last_report_count = vi
+
+        p_idx = (p / bucket_size).astype(int)
+        nearby_faces = set()
+        for dbx in (-1, 0, 1):
+            for dby in (-1, 0, 1):
+                for dbz in (-1, 0, 1):
+                    nearby_faces.update(buckets.get((p_idx[0]+dbx, p_idx[1]+dby, p_idx[2]+dbz), []))
+
+        best_dist_sq = np.inf
+        best_pt = p
+        for fi in nearby_faces:
+            f = faces[fi]
+            v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
+            closest = _closest_on_triangle(p, v0, v1, v2)
+            dist_sq = np.sum((closest - p) ** 2)
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_pt = closest
+
+        distances[vi] = np.sqrt(best_dist_sq)
+        closest_pts[vi] = best_pt
+
+    # Determine sign via ray-casting: cast ray from voxel center outward
+    # Count surface crossings; odd = inside, even = outside
+    # Cache ray results per (x,y) column to avoid recalculating for every z in the column
+    signs = np.ones(len(voxel_centers))
+    ray_cache = {}
+
+    print(f"  SDF: Computing interior signs via ray-casting...", flush=True)
+    for vi in range(len(voxel_centers)):
+        p = voxel_centers[vi]
+        px, py, pz = float(p[0]), float(p[1]), float(p[2])
+
+        # Check cache for this (x, y) column
+        cache_key = (px, py)
+        if cache_key not in ray_cache:
+            ray_z_hits = _ray_z_hits(verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]],
+                                      px, py)
+            ray_cache[cache_key] = sorted(ray_z_hits)
+
+        ray_hits = ray_cache[cache_key]
+        # Count crossings above this point
+        crossings = sum(1 for z in ray_hits if z > pz)
+        signs[vi] = -1 if crossings % 2 == 1 else 1
+
+    return distances * signs, closest_pts
+
+
+def voxelize_sdf(verts, faces, grid, hollow=False, want_anchors=True,
+                 smooth_normals=True, min_thickness=0, crease_deg=35.0, preserve_features=True):
+    """Voxelization via signed distance field (SDF). Robust on organic/complex geometry.
+
+    Computes signed distance from each voxel center to the mesh surface, then thresholds
+    at 0 to determine solid/empty. Better than ray-parity for non-manifold/artistic shapes."""
+    import time
+    t0 = time.time()
+
+    cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
+    surface, anchors, _ = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
+                                        cnormals=cn, crease_face=None)
+    if not surface:
+        raise ValueError('voxelization produced no voxels (empty/degenerate mesh)')
+
+    # Compute SDF at all voxel centers
+    print(f"[voxelize_sdf] Computing SDF for {grid}^3 voxel centers...", flush=True)
+    voxel_centers = np.array([(x + 0.5, y + 0.5, z + 0.5)
+                              for x in range(grid) for y in range(grid) for z in range(grid)],
+                             dtype=np.float64)
+    sdf, closest = _signed_distance_to_mesh(voxel_centers, verts, faces)
+
+    # Threshold: negative SDF = inside (solid)
+    occ = sdf.reshape((grid, grid, grid)) < 0
+
+    if want_anchors and preserve_features and anchors:
+        edges, corners = mesh_crease_features(verts, faces, crease_deg)
+        anchors = feature_snap_anchors(anchors, edges, corners, radius=100.0 / 84.0)
+
+    if hollow:
+        t_hollow = time.time()
+        print(f"[voxelize_sdf] Creating hollow shell (thickness={max(1, min_thickness)})...")
+        occ = hollow_shell(occ, grid, max(1, min_thickness))
+        print(f"[voxelize_sdf] Hollow shell complete in {time.time()-t_hollow:.1f}s")
+
+    voxels = np.argwhere(occ)
+    if (voxels < 0).any() or (voxels >= grid).any():
+        import sys
+        oob_count = np.sum((voxels < 0) | (voxels >= grid))
+        print(f"WARNING: {oob_count} out-of-bounds voxels detected!", file=sys.stderr)
+        voxels = np.clip(voxels, 0, grid - 1)
+
+    elapsed = time.time() - t0
+    print(f"[voxelize_sdf] FINAL: {len(voxels)} voxels in {elapsed:.1f}s")
+    return voxels, anchors
 
 
 def voxelize_flood_fill(verts, faces, grid, hollow=False, want_anchors=True,
@@ -1184,6 +1380,12 @@ def voxelize_flood_fill(verts, faces, grid, hollow=False, want_anchors=True,
         occ = solid
 
     voxels = np.argwhere(occ)
+    # Diagnostic: check for any out-of-bounds voxels (should not happen)
+    if (voxels < 0).any() or (voxels >= grid).any():
+        import sys
+        oob_count = np.sum((voxels < 0) | (voxels >= grid))
+        print(f"WARNING: {oob_count} out-of-bounds voxels detected!", file=sys.stderr)
+        voxels = np.clip(voxels, 0, grid - 1)
     print(f"[voxelize_flood_fill] FINAL: {len(voxels)} voxels extracted from occupancy grid")
     return voxels, anchors
 
@@ -1193,14 +1395,14 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
              voxelization_method='sat'):
     """Full voxelization -> (voxels, anchors, labels).
 
-    voxelization_method='sat' (default): SAT-based surface detection + containment/fill.
-    voxelization_method='flood': flood-fill from outside (more robust on complex geometry).
+    voxelization_method='sat' (default): SAT-based surface + band-fill (fast, conservative).
+    voxelization_method='ray': SAT-based surface + ray-parity containment (accurate, robust).
+    voxelization_method='sdf': Signed Distance Field (best for organic/curved shapes, slower).
+    voxelization_method='flood': flood-fill from outside (experimental; fails if mesh touches boundary).
 
-    solid_mode='contain' (default): mesh-tight interior (center-in-mesh z-parity) UNIONED
-        with the conservative SAT surface, so THIN features (< the interior sampling can
-        catch) are still represented; smoothing then pulls the surface layer onto the mesh.
-        (Ignored when voxelization_method='flood')
-    solid_mode='band': conservative SAT surface + span fill only.
+    solid_mode: only used by 'sat' method.
+        'contain' (default): mesh-tight interior via z-parity UNIONED with SAT surface.
+        'band': conservative SAT surface + span fill only.
     hollow=True: surface shell only (no interior), for hulls with a modeled outer skin.
     smooth_normals=True: anchor targets projected onto the PN-triangle surface using
         CREASE-LIMITED corner normals (crease_deg) -- curved regions round out, but flat
@@ -1221,10 +1423,43 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     object churn), not a Python set -- for a solid shape N can be ~all of grid^3, and a
     coordinate array costs ~24 B/entry vs ~190 B/entry for a set of tuples."""
 
+    # Pre-process: weld vertices to fix non-manifold mesh topology
+    verts_before = len(verts)
+    verts = np.asarray(verts, dtype=np.float32)
+    verts_rounded = np.round(verts / 0.001) * 0.001  # 1mm grid precision
+    unique_verts, inv_map = np.unique(verts_rounded, axis=0, return_inverse=True)
+    faces = inv_map[faces.flatten()].reshape(faces.shape)
+    verts = unique_verts
+    if len(verts) < verts_before:
+        print(f"[voxelize] Welded mesh: {verts_before:,} → {len(verts):,} vertices ({100*(1-len(verts)/verts_before):.1f}% reduction)", flush=True)
+
+    # Remove degenerate triangles (near-zero area, noise)
+    def tri_area(v0, v1, v2):
+        return np.linalg.norm(np.cross(v1 - v0, v2 - v0)) / 2
+
+    faces_before = len(faces)
+    valid_faces = []
+    for f in faces:
+        if all(0 <= idx < len(verts) for idx in f):  # Valid indices
+            v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
+            if tri_area(v0, v1, v2) > 1e-6:  # Non-degenerate
+                valid_faces.append(f)
+    faces = np.array(valid_faces)
+    if len(faces) < faces_before:
+        print(f"[voxelize] Removed degenerate triangles: {faces_before:,} → {len(faces):,} ({faces_before-len(faces)} filtered)", flush=True)
+
     if voxelization_method == 'flood':
         return voxelize_flood_fill(verts, faces, grid, hollow=hollow, want_anchors=want_anchors,
                                    smooth_normals=smooth_normals, min_thickness=min_thickness,
                                    crease_deg=crease_deg, preserve_features=preserve_features)
+
+    if voxelization_method == 'sdf':
+        return voxelize_sdf(verts, faces, grid, hollow=hollow, want_anchors=want_anchors,
+                            smooth_normals=smooth_normals, min_thickness=min_thickness,
+                            crease_deg=crease_deg, preserve_features=preserve_features)
+
+    if voxelization_method == 'ray':
+        solid_mode = 'contain'
 
     cn = corner_normals(verts, faces, crease_deg) if (want_anchors and smooth_normals) else None
     surface, anchors, _ = voxelize_surface(verts, faces, grid, want_anchors=want_anchors,
@@ -1278,7 +1513,15 @@ def voxelize(verts, faces, grid, hollow=False, want_anchors=True, solid_mode='co
     else:
         occ = solid
     voxels = np.argwhere(occ)                     # compact (N,3) int64, C-order sorted
-    print(f"[voxelize] FINAL: {len(voxels)} voxels extracted from {occ.dtype} occupancy grid")
+    # Diagnostic: check for any out-of-bounds voxels (should not happen)
+    if (voxels < 0).any() or (voxels >= grid).any():
+        import sys
+        oob_count = np.sum((voxels < 0) | (voxels >= grid))
+        print(f"WARNING: {oob_count} out-of-bounds voxels detected!", file=sys.stderr)
+        voxels = np.clip(voxels, 0, grid - 1)
+    final_count = len(voxels)
+    print(f"[voxelize] FINAL: {final_count:,} voxels extracted from {occ.dtype} occupancy grid "
+          f"({100*final_count/(grid**3):.1f}% of grid)")
     return voxels, anchors
 
 

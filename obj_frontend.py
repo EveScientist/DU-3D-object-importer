@@ -30,7 +30,11 @@ CORE_ORIGIN = 8
 #   - local PC / Docker: raise it via OBJTODU_MAX_VOXELS (e.g. 134_217_728 for grid 512,
 #     the largest the web UI's max_grid field will ever request) once you have the RAM --
 #     the code is identical, only this ceiling changes.
-MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 5_000_000)
+# Memory budget for worst-case solid shapes. Can be overridden via OBJTODU_MAX_VOXELS env var.
+# Note: Most shapes are hollow/sparse, so actual voxel count << grid³. The limit is a safety guard.
+# Raised from 5M to allow XL @ 2048. Most organic shapes are far below 1B voxels in practice.
+# Default: 1B voxels (~64 GB absolute worst case). Override for constrained environments.
+MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 1_000_000_000)
 
 
 def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=None,
@@ -50,8 +54,10 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
                          applied before voxelizing so all downstream logic is consistent.
     crease_deg          edge-sharpness threshold: faces diverging > this angle are crease-snapped
                         (lower = catches gentler edges, 10-60 range typical; default 35).
-    voxelization_method 'sat' (default): SAT-based surface detection + containment fill.
-                        'flood': flood-fill from outside (more robust on complex geometry).
+    voxelization_method 'sat' (default): SAT-based surface detection + band-fill (fast).
+                        'ray': SAT surface + accurate ray-parity interior (more robust).
+                        'sdf': Signed Distance Field (best for organic/curved shapes, slower).
+                        'flood': flood-fill from outside (experimental; fails if mesh touches boundary).
     """
     import time
     try:
@@ -116,6 +122,21 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     d = tuple(int(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i])
               for i in range(3))
     voxels = sarr + np.array(d, np.int64)
+    # Diagnostic: check if voxels stay within expected bounds
+    vox_min = voxels.min(0)
+    vox_max = voxels.max(0)
+    vox_extent = vox_max - vox_min + 1
+    diag_msg = (f"Grid: {grid} | Solid extent in grid: {ex} | "
+                f"Offset d: {d} | "
+                f"Core space range: [{vox_min[0]},{vox_max[0]}] x [{vox_min[1]},{vox_max[1]}] x [{vox_min[2]},{vox_max[2]}] | "
+                f"Extent in core: {vox_extent}")
+    print(f"[obj] {diag_msg}")
+    # Also save to a file for web access
+    try:
+        import tempfile
+        with open(os.path.join(tempfile.gettempdir(), 'voxelize_diagnostic.txt'), 'w') as f:
+            f.write(diag_msg + '\n')
+    except: pass
     smooth_fn = None
     if want_anchors and anchors:
         smooth_fn = VX.anchor_smooth_fn(anchors, delta=d)   # shifts key AND target by d
@@ -128,7 +149,7 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
                      voxelization_method='sat'):
     """Full pipeline: .obj file -> .blueprint file. smooth=True deflects surface vertices
     onto the mesh (sub-voxel, +-1.19 vox cap). Returns (voxel_count, lod_record_set).
-    voxelization_method: 'sat' (default) or 'flood' for alternative algorithm."""
+    voxelization_method: 'sat' (default), 'ray', 'sdf', or 'flood' for different algorithms."""
     voxels, smooth_fn = voxelize_obj(obj_path, size=size, fill_fraction=fill_fraction,
                                      hollow=hollow, grid=grid, want_anchors=smooth,
                                      max_grid=max_grid, min_thickness=min_thickness,
@@ -204,7 +225,7 @@ def obj_to_blueprints(obj_path, out_base, mode='auto', size=None, core_type='sta
                      manifest listing each tile's integer core offset (place adjacent
                      in-game). Seam smoothing is per-core (constructs are independent).
 
-    voxelization_method: 'sat' (default) or 'flood' for alternative algorithm.
+    voxelization_method: 'sat' (default), 'ray', 'sdf', or 'flood' for different algorithms.
     Returns a manifest dict.
     """
     import os

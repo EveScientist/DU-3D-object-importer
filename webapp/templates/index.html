@@ -49,6 +49,25 @@
   .bar > i { display:block; height:100%; width:40%; background:var(--acc);
              animation:slide 1.1s ease-in-out infinite; }
   @keyframes slide { 0%{margin-left:-40%} 100%{margin-left:100%} }
+  .progress-container { margin-top:12px; display:none; }
+  .progress-bar { width:100%; height:24px; background:#0e131a; border-radius:8px; overflow:hidden;
+                  border:1px solid var(--line); }
+  .progress-fill { height:100%; background:linear-gradient(90deg, var(--acc), #a3d5ff);
+                   width:0%; transition:width 0.3s ease; display:flex; align-items:center;
+                   justify-content:center; font-size:11px; font-weight:600; color:#001; }
+  .progress-text { margin-top:6px; font-size:13px; color:var(--mut); }
+  .progress-metrics { margin-top:8px; display:flex; gap:16px; font-size:12px; color:var(--mut); }
+  .progress-metrics span { display:flex; gap:4px; align-items:center; }
+  .voxel-bar { width:100%; height:18px; background:#0e131a; border-radius:6px; overflow:hidden;
+               border:1px solid var(--line); margin-top:12px; display:flex; align-items:center; }
+  .voxel-fill { height:100%; background:linear-gradient(90deg, #a3d5ff, #4aa3ff);
+                width:0%; transition:width 0.2s ease; display:flex; align-items:center;
+                justify-content:center; font-size:10px; font-weight:600; color:#001; }
+  .voxel-label { font-size:11px; color:var(--mut); margin-top:4px; }
+  .debug-log { margin-top:12px; display:none; background:#0e131a; border:1px solid var(--line);
+               border-radius:8px; padding:12px; font-family:monospace; font-size:11px;
+               color:#a9c7ff; max-height:300px; overflow-y:auto; }
+  .debug-log div { margin-bottom:2px; line-height:1.3; }
   #viewers { display:flex; gap:12px; margin-top:12px; }
   @media (max-width:620px) { #viewers { flex-direction:column; } }
   .vpane { flex:1 1 0; min-width:0; }
@@ -135,14 +154,16 @@
         <input type="number" name="fill" min="0.05" max="1" step="0.05" value="0.9">
       </div>
       <div>
-        <label>Max resolution <span class="hint">— voxel grid cap (higher = sharper, slower)</span></label>
-        <input type="number" name="max_grid" min="32" max="512" step="16" value="256">
+        <label>Max resolution <span class="hint">— voxel grid cap (higher = sharper, slower); L=1024, XL=2048, XXL=4096</span></label>
+        <input type="number" name="max_grid" min="32" max="32768" step="16" value="256" id="max_grid_input">
       </div>
       <div>
-        <label>Voxelization method <span class="hint">— SAT (default) for most meshes; Flood for complex curved shapes</span></label>
+        <label>Voxelization method <span class="hint">— SAT (default, fast) | Ray (accurate) | SDF (organic shapes) | Flood (experimental)</span></label>
         <select name="voxel_method">
-          <option value="sat" selected>SAT (fast, SAT-based surface)</option>
-          <option value="flood">Flood (robust for complex geometry)</option>
+          <option value="sat" selected>SAT (fast, good for hard surfaces)</option>
+          <option value="ray">Ray (accurate ray-parity interior)</option>
+          <!-- <option value="sdf">SDF (best for organic/curved shapes, slower)</option> -->
+          <option value="flood">Flood (experimental; avoid if mesh touches boundary)</option>
         </select>
       </div>
     </div>
@@ -159,6 +180,7 @@
       <label><input type="checkbox" name="smooth" checked> Smooth surface <span class="hint">(deflect to the mesh; keeps sharp edges — uncheck for pure blocky voxels)</span></label>
       <label><input type="checkbox" name="hollow" id="hollow"> Hollow <span class="hint">(shell only / keep internal voids)</span></label>
       <label><input type="checkbox" name="rotate_to_z_up" checked> Rotate to Z-up <span class="hint">(OBJ/STL are Y-up; DU is Z-up)</span></label>
+      <label><input type="checkbox" name="debug"> Debug mode <span class="hint">(show detailed conversion logs)</span></label>
     </div>
 
     <div class="row" id="thickrow" style="display:none">
@@ -170,6 +192,17 @@
 
     <button type="submit" id="go">Convert &amp; download</button>
     <div class="bar" id="bar"><i></i></div>
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"><span id="progressPercent">0%</span></div></div>
+      <div class="progress-text" id="progressText">Initializing...</div>
+      <div class="progress-metrics">
+        <span>📊 Memory: <strong id="progressMem">0 MB</strong></span>
+        <span>⚡ CPU: <strong id="progressCPU">0%</strong></span>
+      </div>
+      <div class="voxel-bar"><div class="voxel-fill" id="voxelFill" style="width:0%"><span id="voxelPercent"></span></div></div>
+      <div class="voxel-label" id="voxelLabel">Voxels: 0 / 0</div>
+    </div>
+    <div class="debug-log" id="debugLog"></div>
     <div class="status" id="status"></div>
   </form>
 
@@ -191,28 +224,113 @@ hollow.addEventListener('change', () => { thickrow.style.display = hollow.checke
 snapSlider.addEventListener('input', () => { snapValue.textContent = snapSlider.value; });
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
-  st.className = 'status'; st.textContent = 'Voxelizing and building blueprint… this can take up to a minute for high resolution.';
-  go.disabled = true; bar.style.display = 'block';
+  st.className = 'status'; st.textContent = '';
+  go.disabled = true;
+  const pc = document.getElementById('progressContainer');
+  const pf = document.getElementById('progressFill');
+  const pp = document.getElementById('progressPercent');
+  const pt = document.getElementById('progressText');
+  const pm = document.getElementById('progressMem');
+  const pc_cpu = document.getElementById('progressCPU');
+  const vf = document.getElementById('voxelFill');
+  const vp = document.getElementById('voxelPercent');
+  const vl = document.getElementById('voxelLabel');
+  const dl = document.getElementById('debugLog');
+  const debug = f.querySelector('input[name=debug]').checked;
+  pc.style.display = 'block';
+  if (debug) dl.style.display = 'block'; else dl.textContent = '';
+  pf.style.width = '0%'; pp.textContent = '0%';
+  let lastProgressTime = Date.now();
+  let stallWarningShown = false;
   try {
-    const res = await fetch('/convert', { method:'POST', body: new FormData(f) });
+    const res = await fetch('/convert-stream', { method:'POST', body: new FormData(f) });
     if (!res.ok) {
-      let msg = 'Conversion failed.';
-      try { msg = (await res.json()).error || msg; } catch(_){}
-      st.className = 'status err'; st.textContent = msg;
-    } else {
-      const blob = await res.blob();
-      const cd = res.headers.get('Content-Disposition') || '';
-      const m = cd.match(/filename="?([^"]+)"?/);
-      const name = m ? m[1] : 'construct.blueprint';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = name; a.click();
-      URL.revokeObjectURL(url);
-      st.className = 'status ok'; st.textContent = 'Done — ' + name + ' downloaded (' + Math.round(blob.size/1024) + ' KB).';
+      st.className = 'status err'; st.textContent = 'Conversion failed: ' + res.statusText;
+      pc.style.display = 'none'; go.disabled = false; return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const stallCheckInterval = setInterval(() => {
+      if (Date.now() - lastProgressTime > 30000 && !stallWarningShown) {
+        stallWarningShown = true;
+        st.textContent = '⚠️ No progress for 30+ seconds - process may be stuck. Check container resources.';
+        st.className = 'status err';
+        if (debug) {
+          dl.innerHTML += '<div style="color:#ff8080;font-weight:bold;">⚠️ WARNING: Stalled for 30+ seconds!</div>';
+          dl.scrollTop = dl.scrollHeight;
+        }
+      }
+    }, 2000);
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) { clearInterval(stallCheckInterval); break; }
+      buffer += decoder.decode(value, {stream: true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const msg = JSON.parse(line.slice(6));
+            lastProgressTime = Date.now();
+            stallWarningShown = false;
+            if (msg.stage === 'done') {
+              pf.style.width = '100%'; pp.textContent = '100%'; pt.textContent = 'Download starting…';
+              const bp = Uint8Array.from(atob(msg.blueprint), c => c.charCodeAt(0));
+              const blob = new Blob([bp], {type: 'application/octet-stream'});
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a'); a.href = url; a.download = msg.filename; a.click();
+              URL.revokeObjectURL(url);
+              if (msg.logs && debug) { dl.innerHTML += '<div>--- Conversion complete ---</div>'; }
+              st.className = 'status ok'; st.textContent = 'Done — ' + msg.filename + ' downloaded (' + Math.round(blob.size/1024) + ' KB).';
+            } else if (msg.stage === 'error') {
+              st.className = 'status err'; st.textContent = 'Error: ' + msg.error;
+              if (msg.logs && debug) { dl.innerHTML += '<div style="color:#ff8080;">' + msg.logs.split('\n').slice(-10).join('</div><div>') + '</div>'; }
+            } else if (msg.stage === 'progress') {
+              // Heartbeat/progress: update metrics and parse voxel progress
+              pt.textContent = msg.detail;
+              if (msg.mem_mb) pm.textContent = msg.mem_mb + ' MB';
+              if (msg.cpu_pct) pc_cpu.textContent = msg.cpu_pct + '%';
+
+              // Parse voxel progress from detail (e.g., "SDF: 50000/1048576 voxels (4%)")
+              const voxelMatch = msg.detail.match(/(\d+)\/(\d+)\s+voxels\s+\((\d+)%\)/);
+              if (voxelMatch) {
+                const [, current, total, pct] = voxelMatch;
+                vf.style.width = pct + '%';
+                vp.textContent = pct > 5 ? pct + '%' : '';
+                vl.textContent = `Voxels: ${(current/1000).toFixed(0)}k / ${(total/1000).toFixed(0)}k`;
+              }
+
+              // Add to debug log only if it's a heartbeat (not voxel detail)
+              if (debug && msg.detail && !msg.detail.match(/voxels\s+\(/)) {
+                dl.innerHTML += '<div style="color:#7ee787;font-size:11px;">' + msg.detail + '</div>';
+                if (dl.scrollHeight > dl.clientHeight) dl.scrollTop = dl.scrollHeight;
+              }
+            } else {
+              // Stage change: update everything
+              if (msg.percent) { pf.style.width = msg.percent + '%'; pp.textContent = msg.percent + '%'; }
+              pt.textContent = msg.detail;
+              if (msg.mem_mb) pm.textContent = msg.mem_mb + ' MB';
+              if (msg.cpu_pct) pc_cpu.textContent = msg.cpu_pct + '%';
+              if (debug) {
+                const logLine = msg.stage + ': ' + msg.detail + (msg.mem_mb ? ` [${msg.mem_mb}MB]` : '');
+                dl.innerHTML += '<div>' + logLine + '</div>';
+                dl.scrollTop = dl.scrollHeight;
+                if (msg.logs) {
+                  const newLogs = msg.logs.split('\n').slice(-2).join('<br>');
+                  if (newLogs.trim()) dl.innerHTML += '<div style="color:#a9c7ff;font-size:10px;">' + newLogs + '</div>';
+                  dl.scrollTop = dl.scrollHeight;
+                }
+              }
+            }
+          } catch(_){}
+        }
+      }
     }
   } catch (err) {
     st.className = 'status err'; st.textContent = 'Network error: ' + err;
   } finally {
-    go.disabled = false; bar.style.display = 'none';
+    go.disabled = false; setTimeout(() => { pc.style.display = 'none'; }, 2000);
   }
 });
 </script>
@@ -274,6 +392,16 @@ function makePanel(canvasEl, overEl, hintEl) {
     loading(on) { overEl.classList.toggle('on', on); },
   };
 }
+
+// Update max_grid default when core size changes
+document.querySelector('select[name="size"]').addEventListener('change', function() {
+  const gridDefaults = { 'XS': 128, 'S': 256, 'M': 512, 'L': 1024, 'XL': 2048, 'XXL': 4096 };
+  const newDefault = gridDefaults[this.value] || 256;
+  const maxGridInput = document.getElementById('max_grid_input');
+  if (parseInt(maxGridInput.value) < 256) { // Only auto-update if still at default
+    maxGridInput.value = newDefault;
+  }
+});
 
 let panelIn, panelOut, seq = 0;
 function ensurePanels() {
