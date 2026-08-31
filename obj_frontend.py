@@ -83,12 +83,11 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
         print(f"[obj] grid {grid} capped to {max_grid} for performance "
               f"(pass max_grid= to raise; fills {100*max_grid//core_vox}% of the {size} core)")
         grid = max_grid
-    # MEMORY guard: a solid shape holds up to grid^3 voxels; stored as a Python set of
-    # tuples (~64 B each) plus numpy grids, this is the peak RAM. Cap the grid so the
-    # worst case stays within a server-safe budget (avoids the OOM that killed max-res).
-    if grid ** 3 > MAX_SOLID_VOXELS:
+    # MEMORY guard: solid shapes hold up to grid^3 voxels; hollow shapes are far less.
+    # Only enforce cap for solid shapes, as most organic geometry is hollow/sparse.
+    if not hollow and grid ** 3 > MAX_SOLID_VOXELS:
         safe = int(MAX_SOLID_VOXELS ** (1.0 / 3))
-        print(f"[obj] grid {grid} capped to {safe} to stay within the memory budget "
+        print(f"[obj] grid {grid} capped to {safe} to stay within the memory budget for solid shapes "
               f"(~{MAX_SOLID_VOXELS // 1_000_000}M voxels)")
         grid = safe
     print(f"[obj] grid={grid} (max ~{grid**3 // 1_000_000}M voxels), hollow={hollow}, min_thickness={min_thickness}")

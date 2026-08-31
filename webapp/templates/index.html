@@ -393,15 +393,20 @@ function makePanel(canvasEl, overEl, hintEl) {
   };
 }
 
-// Update max_grid default when core size changes
-document.querySelector('select[name="size"]').addEventListener('change', function() {
-  const gridDefaults = { 'XS': 128, 'S': 256, 'M': 512, 'L': 1024, 'XL': 2048, 'XXL': 4096 };
-  const newDefault = gridDefaults[this.value] || 256;
+// Sync max_grid with core size (on load and when size changes)
+function updateMaxGridDefault() {
+  const gridDefaults = { 'XS': 128, 'S': 256, 'M': 512, 'L': 1024, 'XL': 2048, 'XXL': 4096, 'XXXL': 8192 };
+  const sizeSelect = document.querySelector('select[name="size"]');
   const maxGridInput = document.getElementById('max_grid_input');
-  if (parseInt(maxGridInput.value) < 256) { // Only auto-update if still at default
+  const newDefault = gridDefaults[sizeSelect.value] || 256;
+  // Auto-update if still at default (less than 512) or empty
+  if (!maxGridInput.value || parseInt(maxGridInput.value) <= 256) {
     maxGridInput.value = newDefault;
   }
-});
+}
+document.querySelector('select[name="size"]').addEventListener('change', updateMaxGridDefault);
+// Also update on page load
+document.addEventListener('DOMContentLoaded', updateMaxGridDefault);
 
 let panelIn, panelOut, seq = 0;
 function ensurePanels() {
