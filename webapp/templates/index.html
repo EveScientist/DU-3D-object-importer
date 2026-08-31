@@ -237,6 +237,21 @@ f.addEventListener('submit', async (e) => {
   const vl = document.getElementById('voxelLabel');
   const dl = document.getElementById('debugLog');
   const debug = f.querySelector('input[name=debug]').checked;
+
+  // Warn about memory limits for solid shapes at high resolution
+  const isHollow = f.querySelector('input[name=hollow]').checked;
+  const maxGrid = parseInt(f.querySelector('input[name=max_grid]').value) || 256;
+  if (!isHollow && maxGrid > 512) {
+    const estVoxels = Math.pow(maxGrid, 3);
+    const estRamGB = Math.round((estVoxels * 64) / Math.pow(1024, 3));
+    const warning = `⚠️ WARNING: Solid shape at ${maxGrid}³ may need ${estRamGB.toLocaleString()} GB RAM.\n\n` +
+                    `For large solids, consider:\n` +
+                    `• Enable "Hollow" for surface shell only\n` +
+                    `• Reduce grid size\n\n` +
+                    `Continue anyway?`;
+    if (!confirm(warning)) { go.disabled = false; return; }
+  }
+
   pc.style.display = 'block';
   if (debug) dl.style.display = 'block'; else dl.textContent = '';
   pf.style.width = '0%'; pp.textContent = '0%';

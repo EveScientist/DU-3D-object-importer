@@ -93,6 +93,15 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
         grid = safe
     print(f"[obj] grid={grid} (max ~{grid**3 // 1_000_000}M voxels), hollow={hollow}, min_thickness={min_thickness}", flush=True)
 
+    # Warn about memory limits for solid shapes at high resolution
+    if not hollow and grid > 512:
+        est_voxels = grid ** 3
+        est_ram_gb = (est_voxels * 64) // (1024 ** 3)
+        print(f"[WARNING] Solid shape at {grid}³ grid may require {est_ram_gb:,} GB peak RAM (tuple storage).", flush=True)
+        if est_voxels > MAX_SOLID_VOXELS:
+            print(f"[WARNING] Grid {grid} exceeds memory budget ({est_voxels // 1_000_000}M > {MAX_SOLID_VOXELS // 1_000_000}M voxels).", flush=True)
+            print(f"[WARNING] Proceeding, but may run out of memory. For large solid shapes, use hollow=True or reduce grid size.", flush=True)
+
     print(f"[obj] Loading mesh from {obj_path}...", flush=True)
     log_mem("MESH LOAD")
     verts, faces = VX.load_mesh(obj_path)
