@@ -394,19 +394,29 @@ function makePanel(canvasEl, overEl, hintEl) {
 }
 
 // Sync max_grid with core size (on load and when size changes)
-function updateMaxGridDefault() {
+function setupMaxGridSync() {
   const gridDefaults = { 'XS': 128, 'S': 256, 'M': 512, 'L': 1024, 'XL': 2048, 'XXL': 4096, 'XXXL': 8192 };
   const sizeSelect = document.querySelector('select[name="size"]');
   const maxGridInput = document.getElementById('max_grid_input');
-  const newDefault = gridDefaults[sizeSelect.value] || 256;
-  // Auto-update if still at default (less than 512) or empty
-  if (!maxGridInput.value || parseInt(maxGridInput.value) <= 256) {
-    maxGridInput.value = newDefault;
+
+  if (!sizeSelect || !maxGridInput) {
+    console.warn('[setupMaxGridSync] Form elements not found, retrying...');
+    setTimeout(setupMaxGridSync, 100);
+    return;
   }
+
+  function updateMaxGridDefault() {
+    const newDefault = gridDefaults[sizeSelect.value] || 256;
+    // Auto-update if still at default (less than 512) or empty
+    if (!maxGridInput.value || parseInt(maxGridInput.value) <= 256) {
+      maxGridInput.value = newDefault;
+    }
+  }
+
+  sizeSelect.addEventListener('change', updateMaxGridDefault);
+  updateMaxGridDefault(); // Call once on load
 }
-document.querySelector('select[name="size"]').addEventListener('change', updateMaxGridDefault);
-// Also update on page load
-document.addEventListener('DOMContentLoaded', updateMaxGridDefault);
+setupMaxGridSync();
 
 let panelIn, panelOut, seq = 0;
 function ensurePanels() {
