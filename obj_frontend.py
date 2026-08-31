@@ -72,6 +72,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
 
     log_mem("START")
     t0 = time.time()
+    print(f"[obj] Initializing voxelization for {size} core...", flush=True)
     core_vox = E.core_build_voxels(size)          # true voxel resolution (4x world size)
     if grid is None:
         grid = max(1, int(round(core_vox * fill_fraction)))
@@ -81,33 +82,40 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
         # perf guard: a solid grid^3 shape is ~grid^3 voxels; beyond ~256 the pure-Python
         # emitter/voxelizer get slow and blueprints large. Cap unless the caller lifts it.
         print(f"[obj] grid {grid} capped to {max_grid} for performance "
-              f"(pass max_grid= to raise; fills {100*max_grid//core_vox}% of the {size} core)")
+              f"(pass max_grid= to raise; fills {100*max_grid//core_vox}% of the {size} core)", flush=True)
         grid = max_grid
     # MEMORY guard: solid shapes hold up to grid^3 voxels; hollow shapes are far less.
     # Only enforce cap for solid shapes, as most organic geometry is hollow/sparse.
     if not hollow and grid ** 3 > MAX_SOLID_VOXELS:
         safe = int(MAX_SOLID_VOXELS ** (1.0 / 3))
         print(f"[obj] grid {grid} capped to {safe} to stay within the memory budget for solid shapes "
-              f"(~{MAX_SOLID_VOXELS // 1_000_000}M voxels)")
+              f"(~{MAX_SOLID_VOXELS // 1_000_000}M voxels)", flush=True)
         grid = safe
-    print(f"[obj] grid={grid} (max ~{grid**3 // 1_000_000}M voxels), hollow={hollow}, min_thickness={min_thickness}")
+    print(f"[obj] grid={grid} (max ~{grid**3 // 1_000_000}M voxels), hollow={hollow}, min_thickness={min_thickness}", flush=True)
 
+    print(f"[obj] Loading mesh from {obj_path}...", flush=True)
     log_mem("MESH LOAD")
     verts, faces = VX.load_mesh(obj_path)
+    print(f"[obj] Loaded {len(verts)} vertices, {len(faces)} faces", flush=True)
     log_mem(f"LOADED: {len(verts)} verts, {len(faces)} faces")
 
     # rotate Y-up (OBJ/STL convention) to Z-up (DU convention): 90° about X-axis.
     # R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]] maps (x,y,z) -> (x,-z,y) -- stands up Y-tall
     # shapes and doesn't mirror (180° rotation avoids handedness flip vs naive swap).
     if rotate_to_z_up:
+        print(f"[obj] Rotating mesh to Z-up convention...", flush=True)
         verts = verts @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
+
+    print(f"[obj] Fitting mesh to {grid}³ grid...", flush=True)
     verts, _ = VX.fit_to_grid(verts, grid, margin=0)
+    print(f"[obj] Mesh fitted to grid", flush=True)
     log_mem("FITTED TO GRID")
 
-    print(f"[obj] VOXELIZING ({voxelization_method} method)...")
+    print(f"[obj] Starting voxelization via {voxelization_method.upper()} method...", flush=True)
     solid, anchors = VX.voxelize(verts, faces, grid, hollow=hollow,
                                  want_anchors=want_anchors, min_thickness=min_thickness,
                                  crease_deg=crease_deg, voxelization_method=voxelization_method)
+    print(f"[obj] Voxelization complete: {len(solid):,} voxels generated", flush=True)
     log_mem(f"VOXELIZED: {len(solid)} voxels")
     # translate so the shape's min corner sits at CORE_ORIGIN, centred in the core.
     # `solid` is already a compact (N,3) int64 coordinate array (VX.voxelize returns
@@ -120,6 +128,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
     lo = sarr.min(0); ex = sarr.max(0) - lo + 1
     d = tuple(int(CORE_ORIGIN + max(0, (core_vox - 2 * CORE_ORIGIN - ex[i]) // 2) - lo[i])
               for i in range(3))
+    print(f"[obj] Positioning voxels in core...", flush=True)
     voxels = sarr + np.array(d, np.int64)
     # Diagnostic: check if voxels stay within expected bounds
     vox_min = voxels.min(0)
@@ -129,7 +138,7 @@ def voxelize_obj(obj_path, size='M', fill_fraction=0.9, hollow=False, margin=Non
                 f"Offset d: {d} | "
                 f"Core space range: [{vox_min[0]},{vox_max[0]}] x [{vox_min[1]},{vox_max[1]}] x [{vox_min[2]},{vox_max[2]}] | "
                 f"Extent in core: {vox_extent}")
-    print(f"[obj] {diag_msg}")
+    print(f"[obj] {diag_msg}", flush=True)
     # Also save to a file for web access
     try:
         import tempfile
@@ -157,8 +166,10 @@ def obj_to_blueprint(obj_path, out_path, size='M', core_type='static', fill_frac
     if name is None:
         import os
         name = os.path.splitext(os.path.basename(obj_path))[0]
+    print(f"[obj] Building blueprint ({len(voxels):,} voxels)...", flush=True)
     want = P.build_blueprint_sem(out_path, voxels, name, smooth_fn=smooth_fn if smooth else None,
                                  material=material, size=size, core_type=core_type)
+    print(f"[obj] Blueprint saved to {out_path}", flush=True)
     return len(voxels), want
 
 
