@@ -64,7 +64,7 @@
                 width:0%; transition:width 0.2s ease; display:flex; align-items:center;
                 justify-content:center; font-size:10px; font-weight:600; color:#001; }
   .voxel-label { font-size:11px; color:var(--mut); margin-top:4px; }
-  .debug-log { margin-top:12px; display:none; background:#0e131a; border:1px solid var(--line);
+  .debug-log { margin-top:12px; display:block; background:#0e131a; border:1px solid var(--line);
                border-radius:8px; padding:12px; font-family:monospace; font-size:11px;
                color:#a9c7ff; max-height:300px; overflow-y:auto; }
   .debug-log div { margin-bottom:2px; line-height:1.3; }
@@ -180,7 +180,6 @@
       <label><input type="checkbox" name="smooth" checked> Smooth surface <span class="hint">(deflect to the mesh; keeps sharp edges — uncheck for pure blocky voxels)</span></label>
       <label><input type="checkbox" name="hollow" id="hollow"> Hollow <span class="hint">(shell only / keep internal voids)</span></label>
       <label><input type="checkbox" name="rotate_to_z_up" checked> Rotate to Z-up <span class="hint">(OBJ/STL are Y-up; DU is Z-up)</span></label>
-      <label><input type="checkbox" name="debug"> Debug mode <span class="hint">(show detailed conversion logs)</span></label>
     </div>
 
     <div class="row" id="thickrow" style="display:none">
@@ -236,7 +235,7 @@ f.addEventListener('submit', async (e) => {
   const vp = document.getElementById('voxelPercent');
   const vl = document.getElementById('voxelLabel');
   const dl = document.getElementById('debugLog');
-  const debug = f.querySelector('input[name=debug]').checked;
+  const debug = true; // Always show debug log
 
   // Warn about memory limits for solid shapes at high resolution
   const isHollow = f.querySelector('input[name=hollow]').checked;
@@ -253,7 +252,7 @@ f.addEventListener('submit', async (e) => {
   }
 
   pc.style.display = 'block';
-  if (debug) dl.style.display = 'block'; else dl.textContent = '';
+  dl.textContent = ''; // Clear previous logs
   pf.style.width = '0%'; pp.textContent = '0%';
   let lastProgressTime = Date.now();
   let stallWarningShown = false;
@@ -271,10 +270,8 @@ f.addEventListener('submit', async (e) => {
         stallWarningShown = true;
         st.textContent = '⚠️ No progress for 30+ seconds - process may be stuck. Check container resources.';
         st.className = 'status err';
-        if (debug) {
-          dl.innerHTML += '<div style="color:#ff8080;font-weight:bold;">⚠️ WARNING: Stalled for 30+ seconds!</div>';
-          dl.scrollTop = dl.scrollHeight;
-        }
+        dl.innerHTML += '<div style="color:#ff8080;font-weight:bold;">⚠️ WARNING: Stalled for 30+ seconds!</div>';
+        dl.scrollTop = dl.scrollHeight;
       }
     }, 2000);
     while (true) {
@@ -296,11 +293,11 @@ f.addEventListener('submit', async (e) => {
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a'); a.href = url; a.download = msg.filename; a.click();
               URL.revokeObjectURL(url);
-              if (msg.logs && debug) { dl.innerHTML += '<div>--- Conversion complete ---</div>'; }
+              if (msg.logs) { dl.innerHTML += '<div>--- Conversion complete ---</div>'; }
               st.className = 'status ok'; st.textContent = 'Done — ' + msg.filename + ' downloaded (' + Math.round(blob.size/1024) + ' KB).';
             } else if (msg.stage === 'error') {
               st.className = 'status err'; st.textContent = 'Error: ' + msg.error;
-              if (msg.logs && debug) { dl.innerHTML += '<div style="color:#ff8080;">' + msg.logs.split('\n').slice(-10).join('</div><div>') + '</div>'; }
+              if (msg.logs) { dl.innerHTML += '<div style="color:#ff8080;">' + msg.logs.split('\n').slice(-10).join('</div><div>') + '</div>'; }
             } else if (msg.stage === 'progress') {
               // Heartbeat/progress: update metrics and parse voxel progress
               pt.textContent = msg.detail;
@@ -317,7 +314,7 @@ f.addEventListener('submit', async (e) => {
               }
 
               // Add to debug log only if it's a heartbeat (not voxel detail)
-              if (debug && msg.detail && !msg.detail.match(/voxels\s+\(/)) {
+              if (msg.detail && !msg.detail.match(/voxels\s+\(/)) {
                 dl.innerHTML += '<div style="color:#7ee787;font-size:11px;">' + msg.detail + '</div>';
                 if (dl.scrollHeight > dl.clientHeight) dl.scrollTop = dl.scrollHeight;
               }
@@ -327,15 +324,13 @@ f.addEventListener('submit', async (e) => {
               pt.textContent = msg.detail;
               if (msg.mem_mb) pm.textContent = msg.mem_mb + ' MB';
               if (msg.cpu_pct) pc_cpu.textContent = msg.cpu_pct + '%';
-              if (debug) {
-                const logLine = msg.stage + ': ' + msg.detail + (msg.mem_mb ? ` [${msg.mem_mb}MB]` : '');
-                dl.innerHTML += '<div>' + logLine + '</div>';
+              const logLine = msg.stage + ': ' + msg.detail + (msg.mem_mb ? ` [${msg.mem_mb}MB]` : '');
+              dl.innerHTML += '<div>' + logLine + '</div>';
+              dl.scrollTop = dl.scrollHeight;
+              if (msg.logs) {
+                const newLogs = msg.logs.split('\n').slice(-2).join('<br>');
+                if (newLogs.trim()) dl.innerHTML += '<div style="color:#a9c7ff;font-size:10px;">' + newLogs + '</div>';
                 dl.scrollTop = dl.scrollHeight;
-                if (msg.logs) {
-                  const newLogs = msg.logs.split('\n').slice(-2).join('<br>');
-                  if (newLogs.trim()) dl.innerHTML += '<div style="color:#a9c7ff;font-size:10px;">' + newLogs + '</div>';
-                  dl.scrollTop = dl.scrollHeight;
-                }
               }
             }
           } catch(_){}
