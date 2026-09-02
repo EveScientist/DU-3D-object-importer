@@ -266,11 +266,11 @@ f.addEventListener('submit', async (e) => {
     const decoder = new TextDecoder();
     let buffer = '';
     const stallCheckInterval = setInterval(() => {
-      if (Date.now() - lastProgressTime > 30000 && !stallWarningShown) {
+      if (Date.now() - lastProgressTime > 120000 && !stallWarningShown) {
         stallWarningShown = true;
-        st.textContent = '⚠️ No progress for 30+ seconds - process may be stuck. Check container resources.';
+        st.textContent = '⚠️ No progress for 2+ minutes - process may be stuck. Check container resources.';
         st.className = 'status err';
-        dl.innerHTML += '<div style="color:#ff8080;font-weight:bold;">⚠️ WARNING: Stalled for 30+ seconds!</div>';
+        dl.innerHTML += '<div style="color:#ff8080;font-weight:bold;">⚠️ WARNING: Stalled for 2+ minutes!</div>';
         dl.scrollTop = dl.scrollHeight;
       }
     }, 2000);
