@@ -154,7 +154,7 @@
         <input type="number" name="fill" min="0.05" max="1" step="0.05" value="0.9">
       </div>
       <div>
-        <label>Max resolution <span class="hint">— voxel grid cap (higher = sharper, slower); L=1024, XL=2048, XXL=4096</span></label>
+        <label>Max resolution <span class="hint">— voxel grid cap (higher = sharper, slower); L=1024, XL=1024, XXL=2048</span></label>
         <input type="number" name="max_grid" min="32" max="32768" step="16" value="256" id="max_grid_input">
       </div>
       <div>
@@ -237,10 +237,24 @@ f.addEventListener('submit', async (e) => {
   const dl = document.getElementById('debugLog');
   const debug = true; // Always show debug log
 
-  // Warn about memory limits for solid shapes at high resolution
+  // Warn about memory limits for high resolution grids
   const isHollow = f.querySelector('input[name=hollow]').checked;
   const maxGrid = parseInt(f.querySelector('input[name=max_grid]').value) || 256;
-  if (!isHollow && maxGrid > 512) {
+
+  // Warn for any large grid (hollow or solid)
+  if (maxGrid > 1024) {
+    const estVoxels = Math.pow(maxGrid, 3);
+    const estRamGB = Math.round((estVoxels * 64) / Math.pow(1024, 3));
+    const shapeType = isHollow ? "hollow" : "solid";
+    const warning = `⚠️ WARNING: ${shapeType.toUpperCase()} shape at ${maxGrid}³ may need ${estRamGB.toLocaleString()} GB peak RAM.\n\n` +
+                    `Recommended max grid sizes:\n` +
+                    `• XL @ 1024 (safe, ~8 GB)\n` +
+                    `• L @ 1024 (safe, ~8 GB)\n\n` +
+                    `For XL @ 2048, ensure 32+ GB RAM available.\n\n` +
+                    `Continue anyway?`;
+    if (!confirm(warning)) { go.disabled = false; return; }
+  } else if (!isHollow && maxGrid > 512) {
+    // Warn about solid shapes at moderate resolution
     const estVoxels = Math.pow(maxGrid, 3);
     const estRamGB = Math.round((estVoxels * 64) / Math.pow(1024, 3));
     const warning = `⚠️ WARNING: Solid shape at ${maxGrid}³ may need ${estRamGB.toLocaleString()} GB RAM.\n\n` +
@@ -405,7 +419,7 @@ function makePanel(canvasEl, overEl, hintEl) {
 
 // Sync max_grid with core size (on load and when size changes)
 function setupMaxGridSync() {
-  const gridDefaults = { 'XS': 128, 'S': 256, 'M': 512, 'L': 1024, 'XL': 2048, 'XXL': 4096, 'XXXL': 8192 };
+  const gridDefaults = { 'XS': 128, 'S': 256, 'M': 512, 'L': 1024, 'XL': 1024, 'XXL': 2048, 'XXXL': 4096 };
   const sizeSelect = document.querySelector('select[name="size"]');
   const maxGridInput = document.getElementById('max_grid_input');
 

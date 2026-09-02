@@ -64,11 +64,12 @@ def _opts(form):
     size = size if size in CORE_SIZES else 'M'
     # Default max_grid scales with core size: larger cores allow higher resolution
     core_vox = E.core_build_voxels(size)
-    # Grid cap per core size: scales to capture more detail in larger cores
+    # Grid cap per core size: balanced for practical RAM usage
+    # XL @ 1024 is safer than 2048 (which needs 32+ GB RAM)
     grid_cap = {
         'XS': 128, 'S': 256, 'M': 512,
-        'L': 1024, 'XL': 2048, 'XXL': 4096,
-        'XXXL': 8192, 'XXXXL': 16384, 'XXXXXL': 32768
+        'L': 1024, 'XL': 1024, 'XXL': 2048,
+        'XXXL': 4096, 'XXXXL': 8192, 'XXXXXL': 16384
     }.get(size, 1024)
     default_max_grid = min(core_vox, grid_cap)
     voxel_method = form.get('voxel_method', 'sat').lower()
