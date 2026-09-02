@@ -32,8 +32,9 @@ CORE_ORIGIN = 8
 #     the code is identical, only this ceiling changes.
 # Memory budget for worst-case solid shapes. Can be overridden via OBJTODU_MAX_VOXELS env var.
 # Note: Most shapes are hollow/sparse, so actual voxel count << grid³. The limit is a safety guard.
-# Raised from 5M to allow XL @ 2048. Most organic shapes are far below 1B voxels in practice.
-# Default: 1B voxels (~64 GB absolute worst case). Override for constrained environments.
+# For 64GB available: supports up to ~1B voxels (grid³ worst case).
+# Hollow shapes can exceed this and still work (e.g., XL @ 2048 hollow often < 5B actual voxels).
+# Default: 1B voxels (64 GB peak RAM). Override for constrained environments.
 MAX_SOLID_VOXELS = int(os.environ.get('OBJTODU_MAX_VOXELS') or 1_000_000_000)
 
 
